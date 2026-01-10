@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import re
 
 # === 1. 페이지 설정 ===
 st.set_page_config(
@@ -34,28 +35,31 @@ HUB_BRANCH_MAP = {
 }
 ALL_BRANCHES = [b for branches in HUB_BRANCH_MAP.values() for b in branches]
 
-# === 3. 스마트 데이터 로드 함수 (핵심 수정) ===
+# === 3. 데이터 로드 및 처리 함수 ===
+
+def parse_date_robust(date_str):
+    """날짜 문자열에서 (e)나 .04 같은 특수문자를 제거하고 YYYY-MM-01 형태로 변환"""
+    try:
+        s = str(date_str).strip()
+        # 정규식: 숫자2자리 + 구분자(/또는.) + 숫자1~2자리 추출 (예: 25/10(e) -> 25, 10)
+        match = re.match(r'^(\d{2})[/.](?:\s*)(\d{1,2})', s)
+        if match:
+            yy, mm = match.groups()
+            return f"20{yy}-{int(mm):02d}-01"
+        return None
+    except:
+        return None
 
 def find_sheet_by_keyword(excel_file, keywords):
-    """엑셀 파일에서 키워드가 포함된 시트 이름을 찾아냅니다."""
+    """키워드가 포함된 시트를 자동으로 찾음"""
     try:
         xls = pd.ExcelFile(excel_file)
         sheet_names = xls.sheet_names
-        
-        # 1. 키워드 매칭 시도
         for sheet in sheet_names:
             for keyword in keywords:
-                if keyword in sheet:
-                    return sheet
-        
-        # 2. 매칭 실패 시, 순서대로 반환 (가정)
-        # 키워드에 따라 몇 번째 시트인지 추측
-        if "시각화" in keywords: return sheet_names[0]
-        if "정지율" in keywords: return sheet_names[1] if len(sheet_names) > 1 else None
-        if "부실율" in keywords: return sheet_names[2] if len(sheet_names) > 2 else None
-        
+                if keyword in sheet: return sheet
         return None
-    except Exception as e:
+    except:
         return None
 
 def get_excel_file():
@@ -68,19 +72,16 @@ def get_excel_file():
 def load_total_data(file_source):
     if not file_source: return None
     try:
-        # '시각화' 또는 '0901'이 들어간 시트 찾기
         sheet_name = find_sheet_by_keyword(file_source, ["시각화", "0901", "Sheet1"])
         if not sheet_name: return None
         
         df = pd.read_excel(file_source, sheet_name=sheet_name, header=None)
         
-        # 헤더 행 찾기 (구분, L형 건 등이 있는 행)
         header_row = 3
-        # 만약 3행이 아니면 '구분'이라는 글자가 있는 행을 찾음
+        # 헤더 위치 자동 보정
         for i in range(min(10, len(df))):
             if str(df.iloc[i, 0]).strip() == "구분":
-                header_row = i
-                break
+                header_row = i; break
 
         ranges = {"Total": (1, 13), "SP": (15, 27), "KPI": (29, 41)}
         col_names = [
@@ -95,7 +96,6 @@ def load_total_data(file_source):
             
             is_hub = org_name in HUB_BRANCH_MAP.keys()
             is_branch = False; hub_name = None
-            
             if is_hub: hub_name = org_name
             else:
                 for hub, branches in HUB_BRANCH_MAP.items():
@@ -115,17 +115,15 @@ def load_total_data(file_source):
                         })
                 except: continue
         return pd.DataFrame(parsed_data)
-    except Exception as e:
-        return None
+    except: return None
 
 @st.cache_data
 def load_rate_data(file_source, type_key):
     if not file_source: return None
     try:
-        # 키워드로 시트 찾기
+        # 시트 찾기
         keywords = ["정지율"] if type_key == "suspension" else ["부실율"]
         sheet_name = find_sheet_by_keyword(file_source, keywords)
-        
         if not sheet_name: return None
         
         df = pd.read_excel(file_source, sheet_name=sheet_name, header=None)
@@ -142,26 +140,25 @@ def load_rate_data(file_source, type_key):
             sub_df.columns = ["date_raw", "rate"]
             sub_df = sub_df.dropna()
             
+            # 본부 매핑 (엑셀 헤더의 축약형 이름도 처리)
             hub_name = "기타"
             for hub, branches in HUB_BRANCH_MAP.items():
                 if branch_name in branches: hub_name = hub; break
             if branch_name in ["강북강원", "부산경남", "전남전북", "충남충북", "대구경북"]: hub_name = branch_name 
                  
             for _, row in sub_df.iterrows():
-                try:
-                    date_str = str(row['date_raw'])
-                    if '/' in date_str:
-                        yy, mm = date_str.split('/')[:2]
-                        full_date = f"20{yy}-{mm}-01"
-                    else:
-                        full_date = pd.to_datetime(row['date_raw'])
-                    
-                    rate_val = float(str(row['rate']).replace(',', ''))
-                    processed_list.append({"날짜": full_date, "본부": hub_name, "지사": branch_name, "비율": rate_val * 100})
-                except: continue
+                # 날짜 파싱 오류 해결 (핵심 수정)
+                full_date = parse_date_robust(row['date_raw'])
+                if not full_date: continue
+                
+                try: rate_val = float(str(row['rate']).replace(',', ''))
+                except: rate_val = 0.0
+                
+                processed_list.append({"날짜": full_date, "본부": hub_name, "지사": branch_name, "비율": rate_val * 100})
                 
         df_result = pd.DataFrame(processed_list)
-        df_result['날짜'] = pd.to_datetime(df_result['날짜'])
+        if not df_result.empty:
+            df_result['날짜'] = pd.to_datetime(df_result['날짜'])
         return df_result
     except Exception as e:
         return None
@@ -172,13 +169,10 @@ with st.sidebar:
     st.title("🎛️ 대시보드 설정")
     excel_source = get_excel_file()
     
-    # 엑셀 파일 상태 확인 및 디버깅 메시지
     if excel_source:
-        try:
-            xls_debug = pd.ExcelFile(excel_source)
-            st.success(f"파일 로드 성공! (시트: {', '.join(xls_debug.sheet_names)})")
-        except:
-            st.error("엑셀 파일을 읽을 수 없습니다.")
+        st.success("파일 로드 완료")
+    else:
+        st.info("파일을 업로드하거나 data.xlsx를 확인하세요.")
 
     st.markdown("---")
     mode = st.radio("분석 모드", ["📊 현황 스냅샷 (Total/SP)", "📈 시계열 트렌드 (Rate)"])
@@ -243,7 +237,7 @@ else:
     df_rate = load_rate_data(excel_source, sheet_key)
     
     if df_rate is None or df_rate.empty:
-        st.error(f"데이터를 불러올 수 없습니다. '{type_r}' 관련 시트가 있는지 확인해주세요.")
+        st.error(f"데이터를 불러올 수 없습니다. 엑셀 파일에 '{'기관정지율' if type_r=='정지율' else '기관부실율'}' 관련 시트가 있는지 확인해주세요.")
     else:
         if sel_branches: df_v = df_rate[df_rate['지사'].isin(sel_branches)]
         elif sel_hub != "전체": df_v = df_rate[df_rate['본부'] == sel_hub]
@@ -251,5 +245,30 @@ else:
         
         if not df_v.empty:
             fig = px.line(df_v, x='날짜', y='비율', color='지사', markers=True)
-            fig.update_layout(hovermode="x unified")
+            fig.update_layout(hovermode="x unified", yaxis_title="비율 (%)")
             st.plotly_chart(fig, use_container_width=True)
+            
+            # MoM 분석 테이블
+            st.markdown("#### 🔍 전월 대비 변동 분석")
+            try:
+                dates = sorted(df_v['날짜'].unique())
+                if len(dates) >= 2:
+                    curr, prev = dates[-1], dates[-2]
+                    df_p = df_v.pivot(index='지사', columns='날짜', values='비율')
+                    changes = []
+                    for b in df_p.index:
+                        if curr in df_p.columns and prev in df_p.columns:
+                            c_val, p_val = df_p.loc[b, curr], df_p.loc[b, prev]
+                            if pd.notna(c_val) and pd.notna(p_val):
+                                changes.append({"지사": b, "당월": c_val, "전월": p_val, "증감": c_val - p_val})
+                    
+                    if changes:
+                        df_ch = pd.DataFrame(changes)
+                        c1, c2 = st.columns(2)
+                        with c1: 
+                            st.caption(f"🔺 증가 상위 ({curr.strftime('%Y-%m')})")
+                            st.dataframe(df_ch.sort_values("증감", ascending=False).head(5).style.format("{:.2f}"))
+                        with c2: 
+                            st.caption(f"🔻 감소 상위 ({curr.strftime('%Y-%m')})")
+                            st.dataframe(df_ch.sort_values("증감", ascending=True).head(5).style.format("{:.2f}"))
+            except Exception as e: st.caption("분석 데이터를 생성할 수 없습니다.")
