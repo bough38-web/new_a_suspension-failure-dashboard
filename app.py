@@ -6,10 +6,10 @@ from plotly.subplots import make_subplots
 import os
 import re
 
-# === 1. Page & Style Configuration (Expert UI/UX) ===
+# === 1. 페이지 및 스타일 설정 (전문가용 테마) ===
 st.set_page_config(
-    page_title="KTT Branch Operation Dashboard",
-    page_icon="📈",
+    page_title="KTT 지사별 운영 현황 분석",
+    page_icon="📊",
     layout="wide"
 )
 
@@ -21,13 +21,7 @@ st.markdown("""
         font-family: 'Pretendard', sans-serif !important;
     }
     
-    /* Global Background & Text */
-    .stApp {
-        background-color: #f8f9fa;
-        color: #212529;
-    }
-
-    /* Analysis Card Style */
+    /* 고급 카드 디자인 */
     .analysis-card {
         background-color: #ffffff;
         border-radius: 16px;
@@ -42,9 +36,9 @@ st.markdown("""
         box-shadow: 0 8px 30px rgba(0,0,0,0.06);
     }
     
-    /* Insight Box */
+    /* 인사이트 박스 */
     .insight-box {
-        background-color: #f1f3f5;
+        background-color: #f8f9fa;
         border-left: 4px solid #228be6;
         padding: 20px;
         border-radius: 8px;
@@ -52,9 +46,9 @@ st.markdown("""
     }
     .insight-title {
         font-weight: 700;
-        color: #343a40;
+        color: #212529;
         margin-bottom: 12px;
-        font-size: 1.05em;
+        font-size: 1.1em;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -62,54 +56,34 @@ st.markdown("""
     .insight-text {
         color: #495057;
         font-size: 0.95em;
-        line-height: 1.6;
+        line-height: 1.7;
     }
     
-    /* Metric Style */
+    /* 메트릭 스타일 */
     div[data-testid="stMetric"] {
-        background-color: #ffffff;
+        background-color: #fff;
         padding: 16px;
         border-radius: 12px;
         border: 1px solid #e9ecef;
         box-shadow: 0 2px 5px rgba(0,0,0,0.02);
     }
-    div[data-testid="stMetric"] label {
-        font-size: 0.9em;
-        color: #868e96;
-    }
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 1.6em;
-        font-weight: 700;
-        color: #212529;
-    }
-
-    /* Expander Style */
-    .streamlit-expanderHeader {
-        font-weight: 600;
-        font-family: 'Pretendard';
-        background-color: #ffffff;
-        border-radius: 8px;
-    }
     
-    /* Tabs */
+    /* 탭 스타일 */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] { 
-        height: 44px; border-radius: 8px; background-color: #ffffff; 
-        border: 1px solid #dee2e6; font-weight: 600; color: #495057;
-        font-size: 0.9em;
+        height: 48px; border-radius: 8px; background-color: #fff; 
+        border: 1px solid #e9ecef; font-weight: 600; color: #868e96;
     }
     .stTabs [aria-selected="true"] { 
         background-color: #e7f5ff !important; border-color: #1c7ed6 !important; 
         color: #1c7ed6 !important; 
     }
-    
-    [data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e9ecef; }
+    [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #e9ecef; }
 </style>
 """, unsafe_allow_html=True)
 
-# === 2. Settings & Constants ===
-DEFAULT_EXCEL_FILE = "data.xlsx"
-
+# === 2. 설정 및 상수 ===
+# 본부-지사 매핑
 HUB_BRANCH_MAP = {
     "강남/서부": ["강남", "수원", "분당", "강동", "용인", "평택", "인천", "강서", "부천", "안산", "안양", "관악"],
     "강북/강원": ["중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주"],
@@ -120,16 +94,22 @@ HUB_BRANCH_MAP = {
 }
 ALL_BRANCHES = [b for branches in HUB_BRANCH_MAP.values() for b in branches]
 
-# Updated Sort Order
-PREFERRED_ORDER = ["강북강원", "본부", "중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주"]
+# 본부명 정규화 (CSV파일의 '강북강원'을 '강북/강원'으로 매핑)
+HUB_NAME_MAP = {
+    "강북강원": "강북/강원", "부산경남": "부산/경남", "전남전북": "전남/전북",
+    "충남충북": "충남/충북", "대구경북": "대구/경북", "강남서부": "강남/서부"
+}
+
+# 정렬 순서
+PREFERRED_ORDER = ["강북강원", "강북/강원", "본부", "중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주"]
 def sort_key(name):
     try: return PREFERRED_ORDER.index(name)
     except: return 999
 
-# Palette
+# 색상 팔레트
 COLORS = ['#228be6', '#fa5252', '#40c057', '#fcc419', '#7950f2', '#e64980', '#15aabf', '#868e96']
 
-# === 3. Data Loading Functions ===
+# === 3. 데이터 로드 함수 (CSV/Excel 모두 지원) ===
 
 def parse_date_robust(date_str):
     try:
@@ -141,29 +121,63 @@ def parse_date_robust(date_str):
         return None
     except: return None
 
-def find_sheet_by_keyword(excel_file, keywords):
-    try:
-        xls = pd.ExcelFile(excel_file)
-        for sheet in xls.sheet_names:
-            for kw in keywords:
-                if kw in sheet: return sheet
-        return None
-    except: return None
-
-def get_excel_file():
-    uploaded = st.sidebar.file_uploader("📂 Upload Excel File (.xlsx)", type=['xlsx'])
-    if uploaded: return uploaded
-    if os.path.exists(DEFAULT_EXCEL_FILE): return DEFAULT_EXCEL_FILE
+# 파일 찾기 도우미
+def load_data_from_source(source, sheet_keyword, file_keyword):
+    """Excel 또는 CSV에서 데이터 로드"""
+    if source is None: return None
+    
+    # 1. 엑셀 파일인 경우
+    if hasattr(source, 'name') and source.name.endswith('.xlsx'):
+        try:
+            xls = pd.ExcelFile(source)
+            for sheet in xls.sheet_names:
+                if sheet_keyword in sheet:
+                    return pd.read_excel(source, sheet_name=sheet, header=None)
+        except: pass
+    
+    # 2. 로컬 파일 시스템 (CSV 우선 탐색)
+    if isinstance(source, str): # 경로 문자열인 경우
+        if source.endswith('.xlsx') and os.path.exists(source):
+             try:
+                xls = pd.ExcelFile(source)
+                for sheet in xls.sheet_names:
+                    if sheet_keyword in sheet:
+                        return pd.read_excel(source, sheet_name=sheet, header=None)
+             except: pass
+    
+    # 3. CSV 파일 매칭 (GitHub 등에서 다운로드한 파일)
+    # 현재 디렉토리의 파일 중 키워드가 포함된 csv 찾기
+    for f in os.listdir('.'):
+        if file_keyword in f and f.endswith('.csv'):
+            return pd.read_csv(f, header=None)
+            
     return None
 
 @st.cache_data
-def load_total_data(file_source):
-    if not file_source: return None
+def load_total_data():
+    # 1. 업로드된 파일 확인
+    uploaded = st.session_state.get('uploaded_file')
+    
+    # 2. 로컬 파일 확인 (순서: 업로드 -> data.xlsx -> csv)
+    if uploaded:
+        return load_data_from_source(uploaded, "시각화", "시각화")
+    
+    return load_data_from_source("data.xlsx", "시각화", "시각화")
+
+@st.cache_data
+def load_rate_data(type_key):
+    uploaded = st.session_state.get('uploaded_file')
+    kw_sheet = "정지율" if type_key == "suspension" else "부실율"
+    kw_file = "기관정지율" if type_key == "suspension" else "기관부실율"
+    
+    if uploaded:
+        return load_data_from_source(uploaded, kw_sheet, kw_file)
+    
+    return load_data_from_source("data.xlsx", kw_sheet, kw_file)
+
+def process_total_df(df):
+    if df is None: return None
     try:
-        sheet = find_sheet_by_keyword(file_source, ["시각화", "0901", "Sheet1"])
-        if not sheet: return None
-        df = pd.read_excel(file_source, sheet_name=sheet, header=None)
-        
         header_row = 3
         for i in range(min(20, len(df))):
             if str(df.iloc[i, 0]).strip() == "구분": header_row = i; break
@@ -179,7 +193,7 @@ def load_total_data(file_source):
             if not org or org == 'nan': continue
             
             is_hub = org in HUB_BRANCH_MAP.keys()
-            is_br = False; hub_name = org
+            is_br = False; hub_name = None
             if is_hub: hub_name = org
             else:
                 for h, brs in HUB_BRANCH_MAP.items():
@@ -200,16 +214,10 @@ def load_total_data(file_source):
         return pd.DataFrame(parsed)
     except: return None
 
-@st.cache_data
-def load_rate_data(file_source, type_key):
-    if not file_source: return None
+def process_rate_df(df):
+    if df is None: return None
     try:
-        kw = ["정지율"] if type_key == "suspension" else ["부실율"]
-        sheet = find_sheet_by_keyword(file_source, kw)
-        if not sheet: return None
-        df = pd.read_excel(file_source, sheet_name=sheet, header=None)
         processed = []
-        
         for i in range(0, df.shape[1], 2):
             if i+1 >= df.shape[1]: break
             br_name = str(df.iloc[0, i]).strip()
@@ -220,9 +228,12 @@ def load_rate_data(file_source, type_key):
             sub = sub.dropna()
             
             hub_name = "기타"
-            for h, brs in HUB_BRANCH_MAP.items():
-                if br_name in brs: hub_name = h; break
-            if br_name in ["강북강원", "부산경남", "전남전북", "충남충북", "대구경북"]: hub_name = br_name
+            # 본부명 매핑 확인
+            real_name = HUB_NAME_MAP.get(br_name, br_name)
+            if real_name in HUB_BRANCH_MAP.keys(): hub_name = real_name
+            else:
+                for h, brs in HUB_BRANCH_MAP.items():
+                    if br_name in brs: hub_name = h; break
             
             for _, row in sub.iterrows():
                 date_val = parse_date_robust(row['d'])
@@ -238,7 +249,7 @@ def load_rate_data(file_source, type_key):
         return res
     except: return None
 
-# === 4. Data Processing ===
+# === 4. 데이터 가공 ===
 def process_branch_bm_data(df_total, branch_name):
     mask = (df_total['지사'] == branch_name) & (df_total['데이터셋'] == 'KPI')
     df = df_total[mask]
@@ -280,7 +291,6 @@ def generate_text_insight(df_bm, df_trend_susp):
     return "\n\n".join(insights)
 
 def get_hub_summary(df_total):
-    """Calculate summary stats for each hub"""
     mask_kpi = (df_total['데이터셋'] == 'KPI') & (df_total['구분'] == '본부')
     df = df_total[mask_kpi]
     summary = []
@@ -288,22 +298,13 @@ def get_hub_summary(df_total):
     for hub in HUB_BRANCH_MAP.keys():
         d = df[df['본부'] == hub]
         if d.empty: continue
-        
         try:
             cnt = d[d['지표'] == 'L+i형 건']['값'].sum()
             amt = d[d['지표'] == 'L+i형 월정료']['값'].sum()
             rate = d[d['지표'].str.contains('L\+i형.*정지율')]['값'].mean()
-            # If rate < 1, assume it needs *100.
             if rate < 1: rate *= 100
-                
-            summary.append({
-                "본부": hub,
-                "총건수": cnt,
-                "총금액": amt,
-                "정지율": rate
-            })
+            summary.append({"본부": hub, "총건수": cnt, "총금액": amt, "정지율": rate})
         except: continue
-        
     return pd.DataFrame(summary)
 
 # === 5. UI Layout ===
@@ -311,29 +312,35 @@ def get_hub_summary(df_total):
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2702/2702602.png", width=50)
     st.title("Admin Dashboard")
-    excel_src = get_excel_file()
+    
+    # 파일 업로더
+    uploaded_file = st.file_uploader("📂 데이터 파일 업로드 (Excel/CSV)", type=['xlsx', 'csv'])
+    if uploaded_file:
+        st.session_state['uploaded_file'] = uploaded_file
+        st.success("데이터 로드 완료")
     
     st.markdown("---")
     mode = st.radio("MENU", ["🔍 지사별 상세 분석", "📊 전체 현황 스냅샷", "📈 전체 추이 비교"])
 
 # === Main Logic ===
 
-if not excel_src:
-    st.warning("⚠️ Please upload the Excel file to proceed.")
+# 데이터 로드 및 처리
+raw_total = load_total_data()
+raw_susp = load_rate_data("suspension")
+raw_fail = load_rate_data("failure")
+
+df_total = process_total_df(raw_total)
+df_susp = process_rate_df(raw_susp)
+df_fail = process_rate_df(raw_fail)
+
+if df_total is None:
+    st.info("👋 데이터 파일을 업로드하거나 프로젝트 폴더에 'data.xlsx' 또는 'csv' 파일을 위치시켜 주세요.")
     st.stop()
-
-# Load Data
-df_total = load_total_data(excel_src)
-df_susp = load_rate_data(excel_src, "suspension")
-df_fail = load_rate_data(excel_src, "failure")
-
-if df_total is None: st.error("Data Load Failed"); st.stop()
 
 # --- TOP SECTION: Hub Status (Collapsible) ---
 with st.expander("🏢 본부별 운영 현황 요약 (펼치기/접기)", expanded=True):
     hub_summ = get_hub_summary(df_total)
     if not hub_summ.empty:
-        # Create columns dynamically
         cols = st.columns(len(hub_summ))
         for idx, row in hub_summ.iterrows():
             with cols[idx % len(cols)]:
@@ -351,7 +358,6 @@ if "지사별 상세 분석" in mode:
         st.markdown("---")
         st.subheader("필터링 설정")
         hub_options = ["전체"] + list(HUB_BRANCH_MAP.keys())
-        # Default Hub: Gangbuk/Gangwon
         default_hub_idx = hub_options.index("강북/강원") if "강북/강원" in hub_options else 0
         sel_hub_detail = st.selectbox("본부 선택", hub_options, index=default_hub_idx)
         
@@ -388,8 +394,6 @@ if "지사별 상세 분석" in mode:
                 font=dict(family="Pretendard"),
                 margin=dict(t=30, b=0, l=0, r=0)
             )
-            # Prevent overlap on bar chart by adjusting text position if needed
-            fig_bar.update_traces(textposition='auto')
             st.plotly_chart(fig_bar, use_container_width=True)
             
         with col2:
@@ -414,40 +418,30 @@ if "지사별 상세 분석" in mode:
         fig_trend = make_subplots(specs=[[{"secondary_y": True}]])
         
         if not trend_s.empty:
-            # Only label the last point to prevent overlap
             last_pt = trend_s.iloc[-1]
             fig_trend.add_trace(
                 go.Scatter(x=trend_s['날짜'], y=trend_s['비율'], name="정지율", 
-                           mode='lines+markers', 
-                           line=dict(color=COLORS[0], width=3),
+                           mode='lines+markers', line=dict(color=COLORS[0], width=3),
                            hovertemplate="날짜: %{x|%y.%m}<br>정지율: %{y:.2f}%"),
                 secondary_y=False
             )
-            # Add annotation for the last point
+            # Label only last point
             fig_trend.add_annotation(
-                x=last_pt['날짜'], y=last_pt['비율'],
-                text=f"{last_pt['비율']:.2f}%",
-                showarrow=False,
-                yshift=10,
-                font=dict(color=COLORS[0], weight="bold")
+                x=last_pt['날짜'], y=last_pt['비율'], text=f"{last_pt['비율']:.2f}%",
+                showarrow=False, yshift=10, font=dict(color=COLORS[0], weight="bold")
             )
 
         if not trend_f.empty:
             last_pt_f = trend_f.iloc[-1]
             fig_trend.add_trace(
                 go.Scatter(x=trend_f['날짜'], y=trend_f['비율'], name="부실율", 
-                           mode='lines+markers', 
-                           line=dict(color=COLORS[1], width=3, dash='dot'),
+                           mode='lines+markers', line=dict(color=COLORS[1], width=3, dash='dot'),
                            hovertemplate="날짜: %{x|%y.%m}<br>부실율: %{y:.2f}%"),
                 secondary_y=True
             )
             fig_trend.add_annotation(
-                x=last_pt_f['날짜'], y=last_pt_f['비율'],
-                text=f"{last_pt_f['비율']:.2f}%",
-                showarrow=False,
-                yshift=-15,
-                yref="y2",
-                font=dict(color=COLORS[1], weight="bold")
+                x=last_pt_f['날짜'], y=last_pt_f['비율'], text=f"{last_pt_f['비율']:.2f}%",
+                showarrow=False, yshift=-15, yref="y2", font=dict(color=COLORS[1], weight="bold")
             )
             
         fig_trend.update_layout(
@@ -474,10 +468,9 @@ elif "전체 현황 스냅샷" in mode:
         raw_branches = ALL_BRANCHES if sel_hub == "전체" else HUB_BRANCH_MAP.get(sel_hub, [])
         sorted_branches = sorted(raw_branches, key=sort_key)
         
-        # Default Selection: Gang-neung, Won-ju, Nam-yang-ju + others
+        # Defaults
         defaults = ["남양주", "강릉", "원주", "의정부", "고양"]
         default_sel = [b for b in sorted_branches if b in defaults]
-        # If none found (e.g. different hub selected), fallback to first 5
         if not default_sel: default_sel = sorted_branches[:5]
             
         sel_brs = st.multiselect("지사 필터", sorted_branches, default=default_sel)
@@ -505,16 +498,14 @@ elif "전체 현황 스냅샷" in mode:
         
         fig = px.bar(df_c, x='지사', y='값', color='지표', barmode='group', text_auto=fmt, color_discrete_sequence=COLORS)
         fig.update_layout(plot_bgcolor="white", height=500, xaxis_title=None, font=dict(family="Pretendard"))
-        # Ensure percent format for rate
-        if m_type == "비율":
-             fig.update_traces(texttemplate='%{y:.2f}%')
+        if m_type == "비율": fig.update_traces(texttemplate='%{y:.2f}%')
         st.plotly_chart(fig, use_container_width=True)
 
     with t1: render_tab("Total")
     with t2: render_tab("SP")
     with t3: render_tab("KPI")
 
-# ----------------- 3. Overall Trend Comparison -----------------
+# ----------------- 3. Overall Trend -----------------
 else:
     st.title("📈 전체 지사 추이 비교 분석")
     type_r = st.radio("분석 항목", ["정지율", "부실율"], horizontal=True)
@@ -529,7 +520,6 @@ else:
         raw_branches = ALL_BRANCHES if sel_hub == "전체" else HUB_BRANCH_MAP.get(sel_hub, [])
         sorted_branches = sorted(raw_branches, key=sort_key)
         
-        # Default Selection: Gang-neung, Won-ju, Nam-yang-ju + others
         defaults = ["남양주", "강릉", "원주", "의정부", "고양"]
         default_sel = [b for b in sorted_branches if b in defaults]
         if not default_sel: default_sel = sorted_branches[:5]
@@ -551,14 +541,11 @@ else:
                 hovertemplate=f"<b>{branch}</b><br>%{{x|%y.%m}}<br>{type_r}: %{{y:.2f}}%<extra></extra>"
             ))
             
-            # Label only the last point to avoid overlap
             last_val = d.iloc[-1]
             fig.add_annotation(
                 x=last_val['날짜'], y=last_val['비율'],
                 text=f"{last_val['비율']:.2f}%",
-                showarrow=False,
-                yshift=10,
-                font=dict(color=color, size=11, weight="bold")
+                showarrow=False, yshift=10, font=dict(color=color, size=11, weight="bold")
             )
             
         fig.update_layout(
@@ -566,7 +553,7 @@ else:
             xaxis=dict(tickformat="%y년 %-m월", showgrid=True, gridcolor='#f1f3f5'),
             yaxis=dict(ticksuffix="%", tickformat=".2f", showgrid=True, gridcolor='#f1f3f5'),
             font=dict(family="Pretendard"),
-            margin=dict(r=20) # Add margin for last point labels
+            margin=dict(r=20)
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
