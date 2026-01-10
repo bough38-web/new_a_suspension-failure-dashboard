@@ -10,7 +10,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# 스타일 적용
 st.markdown("""
 <style>
     .metric-card {
@@ -21,16 +20,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# === 2. 파일 설정 ===
-# 깃허브에 올릴 엑셀 파일 이름 (이 이름으로 파일을 올려주세요!)
+# === 2. 설정 ===
 DEFAULT_EXCEL_FILE = "data.xlsx"
-
-# 시트 이름 설정 (엑셀 파일 내부의 시트 이름과 정확히 일치해야 함)
-SHEET_NAMES = {
-    "total": "시각화(0901)",
-    "suspension": "기관정지율",
-    "failure": "기관부실율"
-}
 
 # 본부-지사 매핑
 HUB_BRANCH_MAP = {
@@ -43,25 +34,54 @@ HUB_BRANCH_MAP = {
 }
 ALL_BRANCHES = [b for branches in HUB_BRANCH_MAP.values() for b in branches]
 
-# === 3. 데이터 로드 함수 ===
+# === 3. 스마트 데이터 로드 함수 (핵심 수정) ===
+
+def find_sheet_by_keyword(excel_file, keywords):
+    """엑셀 파일에서 키워드가 포함된 시트 이름을 찾아냅니다."""
+    try:
+        xls = pd.ExcelFile(excel_file)
+        sheet_names = xls.sheet_names
+        
+        # 1. 키워드 매칭 시도
+        for sheet in sheet_names:
+            for keyword in keywords:
+                if keyword in sheet:
+                    return sheet
+        
+        # 2. 매칭 실패 시, 순서대로 반환 (가정)
+        # 키워드에 따라 몇 번째 시트인지 추측
+        if "시각화" in keywords: return sheet_names[0]
+        if "정지율" in keywords: return sheet_names[1] if len(sheet_names) > 1 else None
+        if "부실율" in keywords: return sheet_names[2] if len(sheet_names) > 2 else None
+        
+        return None
+    except Exception as e:
+        return None
 
 def get_excel_file():
-    """파일 소스 결정: 수동 업로드 우선, 없으면 로컬 기본 파일"""
     uploaded = st.sidebar.file_uploader("📂 엑셀 파일 수동 업로드 (.xlsx)", type=['xlsx'])
-    if uploaded:
-        return uploaded
-    if os.path.exists(DEFAULT_EXCEL_FILE):
-        return DEFAULT_EXCEL_FILE
+    if uploaded: return uploaded
+    if os.path.exists(DEFAULT_EXCEL_FILE): return DEFAULT_EXCEL_FILE
     return None
 
 @st.cache_data
 def load_total_data(file_source):
     if not file_source: return None
     try:
-        # 엑셀의 특정 시트 읽기 (헤더 없이 읽음)
-        df = pd.read_excel(file_source, sheet_name=SHEET_NAMES["total"], header=None)
+        # '시각화' 또는 '0901'이 들어간 시트 찾기
+        sheet_name = find_sheet_by_keyword(file_source, ["시각화", "0901", "Sheet1"])
+        if not sheet_name: return None
         
+        df = pd.read_excel(file_source, sheet_name=sheet_name, header=None)
+        
+        # 헤더 행 찾기 (구분, L형 건 등이 있는 행)
         header_row = 3
+        # 만약 3행이 아니면 '구분'이라는 글자가 있는 행을 찾음
+        for i in range(min(10, len(df))):
+            if str(df.iloc[i, 0]).strip() == "구분":
+                header_row = i
+                break
+
         ranges = {"Total": (1, 13), "SP": (15, 27), "KPI": (29, 41)}
         col_names = [
             "L형 건", "i형 건", "L+i형 건", "L형 건 정지율", "i형 건 정지율", "L+i형 건 정지율",
@@ -84,24 +104,31 @@ def load_total_data(file_source):
             if not (is_hub or is_branch): continue
             
             for section, (start, end) in ranges.items():
-                vals = row[start:end].values
-                for idx, val in enumerate(vals):
-                    try: num_val = float(str(val).replace(',', '').replace('-', '0'))
-                    except: num_val = 0.0
-                    parsed_data.append({
-                        "본부": hub_name, "지사": org_name, "구분": "본부" if is_hub else "지사",
-                        "데이터셋": section, "지표": col_names[idx], "값": num_val
-                    })
+                try:
+                    vals = row[start:end].values
+                    for idx, val in enumerate(vals):
+                        try: num_val = float(str(val).replace(',', '').replace('-', '0'))
+                        except: num_val = 0.0
+                        parsed_data.append({
+                            "본부": hub_name, "지사": org_name, "구분": "본부" if is_hub else "지사",
+                            "데이터셋": section, "지표": col_names[idx], "값": num_val
+                        })
+                except: continue
         return pd.DataFrame(parsed_data)
     except Exception as e:
         return None
 
 @st.cache_data
-def load_rate_data(file_source, sheet_type):
+def load_rate_data(file_source, type_key):
     if not file_source: return None
     try:
-        target_sheet = SHEET_NAMES["suspension"] if sheet_type == "suspension" else SHEET_NAMES["failure"]
-        df = pd.read_excel(file_source, sheet_name=target_sheet, header=None)
+        # 키워드로 시트 찾기
+        keywords = ["정지율"] if type_key == "suspension" else ["부실율"]
+        sheet_name = find_sheet_by_keyword(file_source, keywords)
+        
+        if not sheet_name: return None
+        
+        df = pd.read_excel(file_source, sheet_name=sheet_name, header=None)
         
         processed_list = []
         num_cols = df.shape[1]
@@ -121,19 +148,17 @@ def load_rate_data(file_source, sheet_type):
             if branch_name in ["강북강원", "부산경남", "전남전북", "충남충북", "대구경북"]: hub_name = branch_name 
                  
             for _, row in sub_df.iterrows():
-                date_str = str(row['date_raw'])
                 try:
-                    # 엑셀 날짜 형식(datetime)이거나 문자열일 수 있음
-                    if isinstance(date_str, str) and '/' in date_str:
-                        yy, mm = date_str.split('/'); full_date = f"20{yy}-{mm}-01"
+                    date_str = str(row['date_raw'])
+                    if '/' in date_str:
+                        yy, mm = date_str.split('/')[:2]
+                        full_date = f"20{yy}-{mm}-01"
                     else:
                         full_date = pd.to_datetime(row['date_raw'])
+                    
+                    rate_val = float(str(row['rate']).replace(',', ''))
+                    processed_list.append({"날짜": full_date, "본부": hub_name, "지사": branch_name, "비율": rate_val * 100})
                 except: continue
-                
-                try: rate_val = float(str(row['rate']).replace(',', ''))
-                except: rate_val = 0.0
-                
-                processed_list.append({"날짜": full_date, "본부": hub_name, "지사": branch_name, "비율": rate_val * 100})
                 
         df_result = pd.DataFrame(processed_list)
         df_result['날짜'] = pd.to_datetime(df_result['날짜'])
@@ -145,10 +170,16 @@ def load_rate_data(file_source, sheet_type):
 
 with st.sidebar:
     st.title("🎛️ 대시보드 설정")
-    st.info("기본 파일: data.xlsx")
-    
     excel_source = get_excel_file()
     
+    # 엑셀 파일 상태 확인 및 디버깅 메시지
+    if excel_source:
+        try:
+            xls_debug = pd.ExcelFile(excel_source)
+            st.success(f"파일 로드 성공! (시트: {', '.join(xls_debug.sheet_names)})")
+        except:
+            st.error("엑셀 파일을 읽을 수 없습니다.")
+
     st.markdown("---")
     mode = st.radio("분석 모드", ["📊 현황 스냅샷 (Total/SP)", "📈 시계열 트렌드 (Rate)"])
     
@@ -168,9 +199,8 @@ if "스냅샷" in mode:
     df_total = load_total_data(excel_source)
     
     if df_total is None or df_total.empty:
-        st.error(f"'{SHEET_NAMES['total']}' 시트를 읽을 수 없습니다. 시트 이름을 확인해주세요.")
+        st.error("데이터를 불러올 수 없습니다. '시각화' 시트가 있는지 확인해주세요.")
     else:
-        # 탭 및 차트 로직 (이전과 동일, 데이터 소스만 변경됨)
         t1, t2, t3 = st.tabs(["Total", "SP", "KPI"])
         def render_tab(key):
             mask = (df_total['데이터셋'] == key)
@@ -182,7 +212,6 @@ if "스냅샷" in mode:
             
             if df_v.empty: st.info("데이터 없음"); return
             
-            # KPI
             c1, c2, c3 = st.columns(3)
             try:
                 tot = df_v[df_v['지표']=='L+i형 건']['값'].sum()
@@ -193,7 +222,6 @@ if "스냅샷" in mode:
                 c3.metric("평균 정지율", f"{rate*100:.2f}%" if key != 'KPI' else f"{rate:.2f}%")
             except: pass
             
-            # Chart
             m_type = st.radio("지표", ["건수", "금액", "비율"], horizontal=True, key=key)
             if m_type == "건수": cols = ["L형 건", "i형 건", "L+i형 건"]
             elif m_type == "금액": cols = ["L형 월정료", "i형 월정료", "L+i형 월정료"]
@@ -207,7 +235,7 @@ if "스냅샷" in mode:
         with t2: render_tab("SP")
         with t3: render_tab("KPI")
 
-else: # 시계열
+else:
     st.title("📈 정지율/부실율 트렌드")
     type_r = st.radio("항목", ["정지율", "부실율"], horizontal=True)
     sheet_key = "suspension" if type_r == "정지율" else "failure"
@@ -215,7 +243,7 @@ else: # 시계열
     df_rate = load_rate_data(excel_source, sheet_key)
     
     if df_rate is None or df_rate.empty:
-        st.error(f"'{SHEET_NAMES[sheet_key]}' 시트를 읽을 수 없습니다.")
+        st.error(f"데이터를 불러올 수 없습니다. '{type_r}' 관련 시트가 있는지 확인해주세요.")
     else:
         if sel_branches: df_v = df_rate[df_rate['지사'].isin(sel_branches)]
         elif sel_hub != "전체": df_v = df_rate[df_rate['본부'] == sel_hub]
