@@ -5,62 +5,70 @@ import plotly.graph_objects as go
 import os
 import re
 
-# === 1. 페이지 및 스타일 설정 (UI/UX 고급화) ===
+# === 1. 페이지 설정 및 고급 테마 적용 ===
 st.set_page_config(
     page_title="KTT 정지/부실 관리 대시보드",
     page_icon="📊",
     layout="wide"
 )
 
-# 고급 CSS 주입 (Pretendard 폰트, 카드 디자인, 호버 효과)
+# 고급 CSS 주입 (Pretendard 폰트, 카드 애니메이션, 그림자 효과)
 st.markdown("""
 <style>
-    /* 폰트 적용 */
+    /* 1. 폰트 적용 (Pretendard) */
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
     
     html, body, [class*="css"] {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif !important;
     }
     
-    /* 메트릭 카드 디자인 */
+    /* 2. 메트릭 카드 디자인 (그림자 + 호버 애니메이션) */
     div[data-testid="stMetric"] {
         background-color: #ffffff;
-        border: 1px solid #e9ecef;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border: 1px solid #f1f3f5;
+        padding: 24px;
+        border-radius: 16px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     }
     div[data-testid="stMetric"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px rgba(0, 0, 0, 0.05);
+        transform: translateY(-5px);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         border-color: #228be6;
     }
     
-    /* 탭 스타일 */
+    /* 3. 탭 디자인 */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
+        gap: 12px;
+        border-bottom: none;
     }
     .stTabs [data-baseweb="tab"] {
         height: 50px;
         white-space: pre-wrap;
         background-color: #f8f9fa;
-        border-radius: 10px;
+        border-radius: 12px;
         border: 1px solid #e9ecef;
-        color: #495057;
+        color: #868e96;
         font-weight: 600;
+        padding: 0 24px;
+        transition: all 0.2s;
     }
     .stTabs [aria-selected="true"] {
         background-color: #e7f5ff !important;
         color: #1c7ed6 !important;
         border-color: #1c7ed6 !important;
+        box-shadow: 0 4px 6px rgba(28, 126, 214, 0.2);
     }
     
-    /* 사이드바 */
+    /* 4. 사이드바 스타일 */
     [data-testid="stSidebar"] {
         background-color: #f8f9fa;
         border-right: 1px solid #e9ecef;
     }
+    
+    /* 5. 데이터프레임 헤더 스타일 */
+    thead tr th:first-child { display:none }
+    tbody th { display:none }
 </style>
 """, unsafe_allow_html=True)
 
@@ -78,30 +86,34 @@ HUB_BRANCH_MAP = {
 }
 ALL_BRANCHES = [b for branches in HUB_BRANCH_MAP.values() for b in branches]
 
-# ★ 커스텀 정렬 순서 (요청하신 순서 반영)
+# ★ 커스텀 정렬 순서 (요청하신 "본부 -> 중앙 -> 강북..." 순서 반영)
 PREFERRED_ORDER = [
-    "강북강원", "본부", # 본부 우선
-    "중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주", # 강북/강원
-    "강남", "수원", "분당", # 예시...
+    "강북강원", "본부", # 본부 데이터 우선
+    "중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주", # 강북/강원 우선
+    "강남", "수원", "분당", "강동", "용인", "평택", "인천", "강서", "부천", "안산", "안양", "관악",
+    "동부산", "남부산", "창원", "서부산", "김해", "울산", "진주",
+    "광주", "전주", "익산", "북광주", "순천", "제주", "목포",
+    "서대전", "충북", "천안", "대전", "충남서부",
+    "동대구", "서대구", "구미", "포항"
 ]
 
-# 컬러 팔레트 (Prism 스타일)
+# 고급 컬러 팔레트 (Prism Theme)
 COLOR_PALETTE = [
     '#228be6', '#fa5252', '#40c057', '#fcc419', '#7950f2', '#e64980', 
     '#15aabf', '#82c91e', '#fd7e14', '#20c997', '#868e96', '#be4bdb'
 ]
 
-# === 3. 데이터 로드 로직 ===
+# === 3. 데이터 로직 함수 ===
 
 def sort_key(name):
-    """커스텀 정렬 키 생성 함수"""
+    """지사 이름을 정해진 순서대로 정렬하기 위한 키 반환"""
     try:
         return PREFERRED_ORDER.index(name)
     except:
-        return 999 # 목록에 없으면 뒤로 보냄
+        return 999 # 목록에 없으면 맨 뒤로
 
 def parse_date_robust(date_str):
-    """날짜 파싱: (e) 등 특수문자 제거 후 YYYY-MM-01 변환"""
+    """(e) 같은 특수문자를 제거하고 날짜 형식으로 변환"""
     try:
         s = str(date_str).strip()
         match = re.match(r'^(\d{2})[/.](?:\s*)(\d{1,2})', s)
@@ -112,6 +124,7 @@ def parse_date_robust(date_str):
     except: return None
 
 def find_sheet_by_keyword(excel_file, keywords):
+    """시트 이름 자동 검색"""
     try:
         xls = pd.ExcelFile(excel_file)
         for sheet in xls.sheet_names:
@@ -135,9 +148,9 @@ def load_total_data(file_source):
         
         df = pd.read_excel(file_source, sheet_name=sheet, header=None)
         
-        # 헤더 자동 탐지
+        # 헤더 위치 자동 탐색 ('구분' 텍스트 찾기)
         header_row = 3
-        for i in range(min(15, len(df))):
+        for i in range(min(20, len(df))):
             if str(df.iloc[i, 0]).strip() == "구분":
                 header_row = i; break
         
@@ -184,6 +197,7 @@ def load_rate_data(file_source, type_key):
         df = pd.read_excel(file_source, sheet_name=sheet, header=None)
         processed = []
         
+        # 2열씩 짝지어서 처리
         for i in range(0, df.shape[1], 2):
             if i+1 >= df.shape[1]: break
             br_name = str(df.iloc[0, i]).strip()
@@ -211,22 +225,22 @@ def load_rate_data(file_source, type_key):
         res = pd.DataFrame(processed)
         if not res.empty:
             res['날짜'] = pd.to_datetime(res['날짜'])
+            # 한글 월 컬럼 (예: 25년 6월)
             res['월'] = res['날짜'].dt.strftime('%y년 %-m월')
         return res
     except: return None
 
-# === 4. UI 구성 ===
+# === 4. UI 레이아웃 ===
 
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2702/2702602.png", width=50)
-    st.title("Dashboard")
+    st.title("Admin Dashboard")
     excel_src = get_excel_file()
     
     if excel_src: st.success("데이터 로드 완료")
     else: st.info("엑셀 파일이 필요합니다.")
     
     st.markdown("---")
-    mode = st.radio("분석 모드", ["📊 현황 스냅샷", "📈 추이 분석 (정지/부실)"])
+    mode = st.radio("MENU", ["📊 현황 스냅샷", "📈 추이 분석 (정지/부실)"])
     
     st.markdown("---")
     sel_hub = st.selectbox("본부 선택", ["전체"] + list(HUB_BRANCH_MAP.keys()))
@@ -238,18 +252,19 @@ with st.sidebar:
     default_sel = sorted_branches[:5] if sel_hub == "전체" else sorted_branches
     sel_brs = st.multiselect("지사 선택", sorted_branches, default=default_sel)
 
-# === 메인 로직 ===
+# === 메인 콘텐츠 ===
 
 if not excel_src:
     st.warning("⚠️ 데이터를 불러올 수 없습니다. 엑셀 파일을 업로드해주세요.")
     st.stop()
 
+# ----------------- 1. 스냅샷 모드 -----------------
 if "스냅샷" in mode:
     st.title("📊 정지 및 SP 현황 스냅샷")
     df = load_total_data(excel_src)
     
     if df is None or df.empty:
-        st.error("스냅샷 데이터를 찾을 수 없습니다.")
+        st.error("스냅샷 데이터를 찾을 수 없습니다. (시각화 시트 확인 필요)")
     else:
         t1, t2, t3 = st.tabs(["📌 Total (총정지)", "⚡ SP 기준", "📉 KPI (부실율)"])
         def render_snap(key):
@@ -266,13 +281,13 @@ if "스냅샷" in mode:
             c1, c2, c3 = st.columns(3)
             with c1: 
                 v = df_v[df_v['지표']=='L+i형 건']['값'].sum()
-                st.metric("총 건수", f"{int(v):,}")
+                st.metric("총 건수", f"{int(v):,}건")
             with c2:
                 v = df_v[df_v['지표']=='L+i형 월정료']['값'].sum()
                 st.metric("총 월정료", f"{int(v/1000):,}천원")
             with c3:
                 v = df_v[df_v['지표'].str.contains('L\+i형.*정지율')]['값'].mean()
-                # KPI는 이미 % 단위일 수 있으므로 상황에 맞게 조정 (여기서는 *100 처리)
+                # 0.005 -> 0.5% 변환
                 disp_val = v * 100 if key != 'KPI' else v
                 st.metric("평균 정지율", f"{disp_val:.2f}%")
             
@@ -283,7 +298,7 @@ if "스냅샷" in mode:
             else: cols = [c for c in df['지표'].unique() if '정지율' in c and 'L+i' in c]; fmt = ".2f"
             
             df_c = df_v[df_v['지표'].isin(cols)].copy()
-            # 정렬
+            # 정렬 및 차트 생성
             df_c['sort_idx'] = df_c['지사'].apply(sort_key)
             df_c = df_c.sort_values(['sort_idx', '값'], ascending=[True, False])
             
@@ -294,9 +309,11 @@ if "스냅샷" in mode:
             )
             fig.update_layout(
                 plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
                 font=dict(family="Pretendard"),
-                xaxis_title=None,
-                height=500
+                xaxis_title=None, yaxis_title=None,
+                height=500,
+                transition_duration=500 # Bar chart transition
             )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -304,7 +321,8 @@ if "스냅샷" in mode:
         with t2: render_snap("SP")
         with t3: render_snap("KPI")
 
-else: # 추이 분석
+# ----------------- 2. 추이 분석 모드 -----------------
+else:
     st.title("📈 정지율/부실율 트렌드 분석")
     type_r = st.radio("분석 항목", ["정지율", "부실율"], horizontal=True)
     
@@ -312,7 +330,7 @@ else: # 추이 분석
     df_r = load_rate_data(excel_src, key)
     
     if df_r is None or df_r.empty:
-        st.error(f"{type_r} 데이터를 찾을 수 없습니다.")
+        st.error(f"{type_r} 데이터를 찾을 수 없습니다. (시트 이름 확인 필요)")
     else:
         if sel_brs: df_v = df_r[df_r['지사'].isin(sel_brs)].copy()
         elif sel_hub != "전체": df_v = df_r[df_r['본부'] == sel_hub].copy()
@@ -321,14 +339,14 @@ else: # 추이 분석
         if df_v.empty:
             st.warning("데이터가 없습니다.")
         else:
-            # 정렬
+            # 커스텀 정렬 적용
             df_v['sort_idx'] = df_v['지사'].apply(sort_key)
             df_v = df_v.sort_values(['sort_idx', '날짜'])
             
-            # === 고급 라인 차트 ===
+            # === 고급 라인 차트 (애니메이션 & 커스텀 툴팁) ===
             fig = go.Figure()
+            unique_branches = df_v['지사'].unique()
             
-            unique_branches = df_v['지사'].unique() # 이미 정렬된 순서
             for i, branch_name in enumerate(unique_branches):
                 d = df_v[df_v['지사'] == branch_name]
                 color = COLOR_PALETTE[i % len(COLOR_PALETTE)]
@@ -339,7 +357,7 @@ else: # 추이 분석
                     name=branch_name,
                     hovertemplate=f"<b>{branch_name}</b><br>날짜: %{{text}}<br>{type_r}: %{{y:.2f}}%<extra></extra>",
                     text=d['월'],
-                    line=dict(width=3, color=color),
+                    line=dict(width=3, color=color, shape='spline'), # 부드러운 곡선
                     marker=dict(size=8, color=color, line=dict(width=2, color='white'))
                 ))
             
@@ -347,12 +365,12 @@ else: # 추이 분석
                 hovermode="x unified",
                 font=dict(family="Pretendard"),
                 xaxis=dict(
-                    tickformat="%y년 %-m월", 
+                    tickformat="%y년 %-m월", # 한글 날짜 포맷
                     showgrid=True, gridcolor='#f1f3f5'
                 ),
                 yaxis=dict(
                     ticksuffix="%", 
-                    tickformat=".2f", # 소수점 2자리
+                    tickformat=".2f", # 정밀 포맷 (소수점 2자리)
                     showgrid=True, gridcolor='#f1f3f5'
                 ),
                 legend=dict(
@@ -361,11 +379,12 @@ else: # 추이 분석
                 ),
                 plot_bgcolor="white",
                 height=550,
-                transition=dict(duration=500, easing="cubic-in-out")
+                # 부드러운 전환 효과 설정
+                transition=dict(duration=800, easing="cubic-in-out")
             )
             st.plotly_chart(fig, use_container_width=True)
             
-            # === 상세 테이블 ===
+            # === 상세 테이블 (히트맵 스타일) ===
             st.markdown(f"### 📋 {type_r} 상세 현황")
             try:
                 latest_date = df_v['날짜'].max()
@@ -383,14 +402,15 @@ else: # 추이 분석
                 display_df = piv[[latest_date, '전월대비']].copy()
                 display_df.columns = [f"{latest_date.strftime('%y년 %-m월')} (%)", "전월비 (%p)"]
                 
-                # 테이블 스타일링 (matplotlib 의존성 제거됨)
+                # matplotlib 의존성 없는 기본 포맷팅 사용 (에러 방지)
                 st.dataframe(
                     display_df.style
                     .format("{:.2f}")
-                    .background_gradient(cmap="Reds", subset=[display_df.columns[0]])
-                    .text_gradient(cmap="RdBu_r", subset=[display_df.columns[1]], vmin=-0.5, vmax=0.5),
+                    # 색상 강조 (matplotlib가 없어도 작동하는 기본 highlight 사용)
+                    .highlight_max(axis=0, color='#e7f5ff') 
+                    .highlight_min(axis=0, color='#fff5f5'),
                     use_container_width=True
                 )
             except Exception as e:
-                # matplotlib가 없어서 에러날 경우 기본 테이블로 표시
-                st.dataframe(display_df.style.format("{:.2f}"), use_container_width=True)
+                # Fallback
+                st.dataframe(display_df, use_container_width=True)
