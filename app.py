@@ -1,404 +1,547 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import os
-import re
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>KTT 정지/부실 관리 대시보드</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@1.3.0"></script>
+  
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
 
-# === 1. 페이지 및 스타일 설정 (고급 테마) ===
-st.set_page_config(
-    page_title="KTT 정지/부실 관리 대시보드",
-    page_icon="📈",
-    layout="wide"
-)
-
-# 고급 CSS 스타일링 (폰트, 카드 그림자, 애니메이션)
-st.markdown("""
-<style>
-    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-    
-    html, body, [class*="css"] {
-        font-family: 'Pretendard', sans-serif;
-    }
-    
-    /* 카드 디자인 */
-    .metric-card {
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-        border: 1px solid #f0f2f5;
-        transition: transform 0.2s ease-in-out;
-    }
-    .metric-card:hover {
-        transform: translateY(-5px);
+  <style>
+    :root {
+      --bg: #f8f9fa; --card: #ffffff; --ink: #343a40; --muted: #868e96; 
+      --line: #e9ecef; --brand: #228be6; --brand-light: #e7f5ff;
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+      --shadow-hover: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
     }
     
-    /* 탭 디자인 */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 12px;
-        border-bottom: none;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        border-radius: 12px;
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
-        font-weight: 600;
-        color: #495057;
-        padding: 0 24px;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #228be6 !important;
-        color: white !important;
-        border-color: #228be6 !important;
-        box-shadow: 0 4px 6px rgba(34, 139, 230, 0.3);
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
     }
     
-    /* 사이드바 */
-    [data-testid="stSidebar"] {
-        background-color: #f8f9fa;
-        border-right: 1px solid #e9ecef;
+    .wrap { max-width: 1400px; margin: 32px auto; padding: 0 24px; }
+    
+    h1 { font-size: 26px; font-weight: 700; margin: 0 0 24px; color: #212529; letter-spacing: -0.5px; }
+    h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; color: #495057; }
+    
+    /* Panel Design */
+    .panel {
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      padding: 24px; margin-bottom: 24px; box-shadow: var(--shadow);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-</style>
-""", unsafe_allow_html=True)
+    .panel:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+    
+    .panel-row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .panel-row > .panel { flex: 1; min-width: 320px; }
+    
+    /* Controls */
+    .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+    .hint { color: var(--muted); font-size: 12px; margin-bottom: 6px; font-weight: 500; }
+    
+    /* Segmented Control */
+    .seg { display: inline-flex; background: #f1f3f5; border-radius: 10px; padding: 4px; }
+    .seg button {
+      padding: 8px 16px; border: 0; background: transparent; cursor: pointer;
+      font-size: 14px; font-weight: 600; color: var(--muted); border-radius: 8px;
+      transition: all 0.2s;
+    }
+    .seg button:hover { color: var(--ink); }
+    .seg button.on { background: #fff; color: var(--brand); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    
+    /* Chips */
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      font-size: 13px; padding: 8px 14px; border-radius: 99px; background: #fff;
+      cursor: pointer; border: 1px solid var(--line); color: var(--ink); font-weight: 500;
+      transition: all 0.15s;
+    }
+    .chip:hover { background: #f8f9fa; border-color: #ced4da; }
+    .chip.on { background: var(--brand-light); border-color: var(--brand); color: var(--brand); font-weight: 600; }
+    
+    /* Buttons */
+    .btn-small {
+      font-size: 12px; padding: 6px 12px; border: 1px solid var(--line);
+      background: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--muted);
+      transition: all 0.15s; margin-top: 8px;
+    }
+    .btn-small:hover { background: #f8f9fa; color: var(--ink); }
+    .btn-small.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+    
+    /* Chart Area */
+    .chart-panel { min-height: 500px; position: relative; }
+    canvas { width: 100% !important; height: 100% !important; max-height: 600px; }
+    
+    /* Toolbar */
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+<div class="wrap">
 
-# === 2. 설정 및 상수 ===
-DEFAULT_EXCEL_FILE = "data.xlsx"
+  <h1>📊 정지/부실 관리 통합 대시보드</h1>
 
-# 본부-지사 매핑
-HUB_BRANCH_MAP = {
-    "강남/서부": ["강남", "수원", "분당", "강동", "용인", "평택", "인천", "강서", "부천", "안산", "안양", "관악"],
-    "강북/강원": ["중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주"],
-    "부산/경남": ["동부산", "남부산", "창원", "서부산", "김해", "울산", "진주"],
-    "전남/전북": ["광주", "전주", "익산", "북광주", "순천", "제주", "목포"],
-    "충남/충북": ["서대전", "충북", "천안", "대전", "충남서부"],
-    "대구/경북": ["동대구", "서대구", "구미", "포항"]
+  <div class="panel">
+    <div class="row">
+      <div>
+        <div class="hint">데이터셋 선택</div>
+        <div class="seg" id="dsSeg">
+          <button data-v="TOTAL" class="on">총정지</button>
+          <button data-v="SP">SP기준</button>
+          <button data-v="DELINQUENCY">부실율(KPI)</button>
+        </div>
+      </div>
+      <div>
+        <div class="hint">차트 유형</div>
+        <div class="seg" id="typeSeg">
+          <button data-v="bar" class="on">막대</button>
+          <button data-v="line">선 (추이)</button>
+          <button data-v="mix">혼합</button>
+          <button data-v="radar">레이더</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-row">
+    <div class="panel">
+      <h2>🏢 본부 선택</h2>
+      <div id="hubButtons" class="chips"></div>
+      <button id="hubAll" class="btn-small">본부 전체 선택</button>
+    </div>
+
+    <div class="panel">
+      <h2>📍 지사 선택</h2>
+      <div id="branchChips" class="chips"></div>
+      <div style="display:flex; gap:8px;">
+        <button id="branchAll" class="btn-small">지사 전체</button>
+        <button id="branchNone" class="btn-small">선택 해제</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>📈 분석 지표 선택</h2>
+    <div class="hint" style="margin-bottom:8px;">건수 지표 (클릭하여 다중 선택 가능)</div>
+    <div id="chipsCounts" class="chips" style="margin-bottom:16px;"></div>
+    
+    <div class="hint" style="margin-bottom:8px;">금액/비율 지표</div>
+    <div id="chipsFees" class="chips"></div>
+    
+    <div class="toolbar">
+      <button id="btnReset" class="btn-small">선택 초기화</button>
+      <button id="btnSelectCounts" class="btn-small">건수 전체</button>
+      <button id="btnSelectFees" class="btn-small">월정료 전체</button>
+      <div style="flex-grow:1"></div>
+      <button id="toggleTopN" class="btn-small">🏆 Top 5 보기</button>
+    </div>
+  </div>
+
+  <div id="chartContainer" class="panel-row">
+      <div class="panel chart-panel">
+          <canvas id="chart"></canvas>
+      </div>
+      <div class="panel chart-panel" id="secondChartPanel" style="display: none;">
+          <canvas id="chart2"></canvas>
+      </div>
+  </div>
+
+</div>
+
+<script>
+Chart.register(ChartDataLabels);
+
+// === 1. 설정 및 상수 ===
+// 요청하신 커스텀 정렬 순서
+const PREFERRED_ORDER = [
+  "강북강원", "본부", // 본부 우선
+  "중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주", // 강북/강원 지사
+  "강남", "수원", "분당", "강동", "용인", "평택", "인천", "강서", "부천", "안산", "안양", "관악", // 강남/서부
+  "동부산", "남부산", "창원", "서부산", "김해", "울산", "진주", // 부산/경남
+  "광주", "전주", "익산", "북광주", "순천", "제주", "목포", // 전남/전북
+  "서대전", "충북", "천안", "대전", "충남서부", // 충남/충북
+  "동대구", "서대구", "구미", "포항" // 대구/경북
+];
+
+const HUB_ALLOWED = ["강남/서부","강북/강원","부산/경남","전남/전북","충남/충북","대구/경북"];
+
+// 고급 컬러 팔레트 (Prism 스타일)
+const COLORS = [
+  '#228be6', '#fa5252', '#40c057', '#fcc419', '#7950f2', '#e64980', 
+  '#15aabf', '#82c91e', '#fd7e14', '#20c997', '#868e96', '#be4bdb'
+];
+const COLORS_BG = COLORS.map(c => c + 'BB'); // 투명도 추가
+
+// 인덱스 범위
+const COUNT_INDEXES = [0,1,2,3,4,5]; 
+const FEE_INDEXES   = [6,7,8,9,10,11]; 
+const DELINQUENCY_COUNT_INDEXES = [28, 29, 30, 31, 32, 33]; 
+const DELINQUENCY_FEE_INDEXES = [34, 35, 36, 37, 38, 39];   
+
+// === 2. 상태 관리 ===
+let CHART = null;
+let CHART2 = null;
+const state = {
+  raw: null, ds: 'TOTAL', type: 'bar',
+  selectedIdx: new Set(), labelSel: new Set(),
+  selectedHub: null, mode: 'hubAll',
+  showTopN: false, topNCount: 5
+};
+
+// === 3. 초기화 ===
+// Google Apps Script 연동
+try {
+  google.script.run.withSuccessHandler(init).fetchAll();
+} catch(e) {
+  console.warn("로컬 테스트 모드입니다. 데이터를 로드할 수 없습니다.");
 }
-ALL_BRANCHES = [b for branches in HUB_BRANCH_MAP.values() for b in branches]
 
-# 사용자가 요청한 우선 정렬 순서 (이 리스트에 있는 지사가 먼저 나옴)
-PREFERRED_ORDER = [
-    "강북강원", "본부", # 본부 데이터
-    "중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주", # 강북/강원 지사
-    "강남", "수원", "분당" # 기타 예시
-]
+function init(payload){
+  if(!payload || !payload.ok){ alert("데이터 로딩 실패: " + (payload?.error || "Unknown error")); return; }
+  state.raw = payload;
 
-# === 3. 스마트 데이터 로드 로직 ===
+  // DELINQUENCY 메타데이터 보정
+  if(state.raw.DELINQUENCY) {
+      if (!state.raw.meta.datasets.includes('DELINQUENCY')) state.raw.meta.datasets.push('DELINQUENCY');
+      state.raw.meta.datasetNames['DELINQUENCY'] = '부실율';
+      state.raw.meta.countIndex = state.raw.meta.countIndex.concat(DELINQUENCY_COUNT_INDEXES);
+      state.raw.meta.feeIndex = state.raw.meta.feeIndex.concat(DELINQUENCY_FEE_INDEXES);
+  }
 
-def parse_date_robust(date_str):
-    """날짜 파싱: (e) 등 특수문자 제거 후 20YY-MM-01 변환"""
-    try:
-        s = str(date_str).strip()
-        match = re.match(r'^(\d{2})[/.](?:\s*)(\d{1,2})', s)
-        if match:
-            yy, mm = match.groups()
-            return f"20{yy}-{int(mm):02d}-01"
-        return None
-    except: return None
+  buildHubButtons(); buildBranchChips(); buildHeaderChips(true);
+  bindTopNButton();
+  renderChart();
 
-def find_sheet_by_keyword(excel_file, keywords):
-    try:
-        xls = pd.ExcelFile(excel_file)
-        for sheet in xls.sheet_names:
-            for kw in keywords:
-                if kw in sheet: return sheet
-        return None
-    except: return None
+  // 이벤트 바인딩
+  bindSeg(dsSeg, v => {
+    state.ds = v; state.mode = 'hubAll'; state.selectedHub = null;
+    state.selectedIdx.clear(); state.labelSel.clear(); state.showTopN = false;
+    buildHubButtons(); buildBranchChips(); buildHeaderChips(true); bindTopNButton(); renderChart();
+  });
+  
+  bindSeg(typeSeg, v => {
+    state.type = v;
+    renderChart(); // 차트 타입 변경 시 즉시 렌더링
+  });
 
-def get_excel_file():
-    uploaded = st.sidebar.file_uploader("📂 엑셀 파일 업로드 (.xlsx)", type=['xlsx'])
-    if uploaded: return uploaded
-    if os.path.exists(DEFAULT_EXCEL_FILE): return DEFAULT_EXCEL_FILE
-    return None
+  btnReset.onclick = () => { state.selectedIdx.clear(); syncHeaderChips(); renderChart(); };
+  btnSelectCounts.onclick = () => quickSelect('count');
+  btnSelectFees.onclick = () => quickSelect('fee');
+  
+  hubAll.onclick = () => {
+    state.mode='hubAll'; state.selectedHub=null; 
+    buildHubButtons(); buildBranchChips(); state.showTopN=false; bindTopNButton(); renderChart();
+  };
+  
+  branchAll.onclick = () => {
+    state.mode='branchAll'; state.selectedHub=null; 
+    buildBranchChips(true); state.showTopN=false; bindTopNButton(); renderChart();
+  };
+  
+  branchNone.onclick = () => {
+    state.labelSel.clear(); syncBranchChips(); renderChart();
+  };
+}
 
-@st.cache_data
-def load_total_data(file_source):
-    if not file_source: return None
-    try:
-        sheet = find_sheet_by_keyword(file_source, ["시각화", "0901", "Sheet1"])
-        if not sheet: return None
-        
-        df = pd.read_excel(file_source, sheet_name=sheet, header=None)
-        
-        # 헤더 자동 탐지
-        header_row = 3
-        for i in range(min(15, len(df))):
-            if str(df.iloc[i, 0]).strip() == "구분":
-                header_row = i; break
-        
-        ranges = {"Total": (1, 13), "SP": (15, 27), "KPI": (29, 41)}
-        col_names = ["L형 건", "i형 건", "L+i형 건", "L형 정지율", "i형 정지율", "L+i형 정지율",
-                     "L형 월정료", "i형 월정료", "L+i형 월정료", "L형료 정지율", "i형료 정지율", "L+i형료 정지율"]
-        
-        parsed = []
-        for i in range(header_row + 1, len(df)):
-            row = df.iloc[i]
-            org = str(row[0]).strip()
-            if not org or org == 'nan': continue
-            
-            is_hub = org in HUB_BRANCH_MAP.keys()
-            is_br = False; hub_name = None
-            
-            if is_hub: hub_name = org
-            else:
-                for h, brs in HUB_BRANCH_MAP.items():
-                    if org in brs: is_br = True; hub_name = h; break
-            
-            if not (is_hub or is_br): continue
-            
-            for section, (start, end) in ranges.items():
-                try:
-                    vals = row[start:end].values
-                    for idx, val in enumerate(vals):
-                        try: num = float(str(val).replace(',', '').replace('-', '0'))
-                        except: num = 0.0
-                        parsed.append({
-                            "본부": hub_name, "지사": org, "구분": "본부" if is_hub else "지사",
-                            "데이터셋": section, "지표": col_names[idx], "값": num
-                        })
-                except: continue
-        return pd.DataFrame(parsed)
-    except: return None
+// === 4. UI 빌더 ===
+function buildHubButtons(){
+  hubButtons.innerHTML='';
+  HUB_ALLOWED.forEach(h=>{
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (state.selectedHub===h && state.mode==='branch' ? ' on' : '');
+    chip.textContent = h;
+    chip.onclick = () => {
+      if(state.mode==='branch' && state.selectedHub===h){ state.mode='hubAll'; state.selectedHub=null; }
+      else { state.mode='branch'; state.selectedHub=h; }
+      state.showTopN = false;
+      buildHubButtons(); buildBranchChips(); bindTopNButton(); renderChart();
+    };
+    hubButtons.appendChild(chip);
+  });
+}
 
-@st.cache_data
-def load_rate_data(file_source, type_key):
-    if not file_source: return None
-    try:
-        kw = ["정지율"] if type_key == "suspension" else ["부실율"]
-        sheet = find_sheet_by_keyword(file_source, kw)
-        if not sheet: return None
-        
-        df = pd.read_excel(file_source, sheet_name=sheet, header=None)
-        processed = []
-        
-        for i in range(0, df.shape[1], 2):
-            if i+1 >= df.shape[1]: break
-            br_name = str(df.iloc[0, i]).strip()
-            if pd.isna(br_name) or br_name == 'nan': continue
-            
-            sub = df.iloc[1:, [i, i+1]].copy()
-            sub.columns = ["d", "v"]
-            sub = sub.dropna()
-            
-            hub_name = "기타"
-            for h, brs in HUB_BRANCH_MAP.items():
-                if br_name in brs: hub_name = h; break
-            if br_name in ["강북강원", "부산경남", "전남전북", "충남충북", "대구경북", "강남서부"]: hub_name = br_name
-            
-            for _, row in sub.iterrows():
-                date_val = parse_date_robust(row['d'])
-                if not date_val: continue
-                try: val = float(str(row['v']).replace(',', ''))
-                except: val = 0.0
-                
-                # 본부 데이터인 경우 지사 이름을 '본부'로 통일하거나 그대로 사용
-                processed.append({
-                    "날짜": date_val, "본부": hub_name, "지사": br_name, "비율": val * 100
-                })
-                
-        res = pd.DataFrame(processed)
-        if not res.empty:
-            res['날짜'] = pd.to_datetime(res['날짜'])
-            # 한글 월 컬럼 추가 (예: 25년 6월)
-            res['월'] = res['날짜'].dt.strftime('%y년 %-m월')
-        return res
-    except: return None
+function buildBranchChips(all=false){
+  branchChips.innerHTML=''; 
+  let branches=[];
+  
+  if(state.mode==='branchAll' || all){ branches = state.raw[state.ds].branch.labels.slice(); }
+  else if(state.mode==='branch' && state.selectedHub){ branches = state.raw.meta.hubBranchMap[state.selectedHub] || []; }
+  else return;
 
-# === 4. UI 및 로직 ===
+  const blockLabels = currentBlock().labels;
+  const filteredBranches = branches.filter(b => blockLabels.includes(b));
+  
+  // 지사 칩 생성 시에도 커스텀 정렬 적용
+  filteredBranches.sort((a, b) => getSortIndex(a) - getSortIndex(b));
+  
+  state.labelSel = new Set(filteredBranches); 
 
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2702/2702602.png", width=50)
-    st.title("Dashboard")
-    excel_src = get_excel_file()
+  filteredBranches.forEach(n => {
+    const el = document.createElement('div');
+    el.className = 'chip on'; el.textContent = n;
+    el.onclick = () => {
+      if(state.labelSel.has(n)) state.labelSel.delete(n); else state.labelSel.add(n);
+      el.classList.toggle('on'); renderChart();
+    };
+    branchChips.appendChild(el);
+  });
+}
+
+function currentBlock(){ return state.mode==='hubAll' ? state.raw[state.ds].hub : state.raw[state.ds].branch; }
+
+function buildHeaderChips(init=false){
+  const headers = currentBlock().header; 
+  chipsCounts.innerHTML=''; chipsFees.innerHTML='';
+  
+  headers.forEach((h, i) => {
+    const chip = document.createElement('div'); 
+    chip.className = 'chip'; chip.textContent = h; chip.dataset.idx = i;
+    chip.onclick = () => {
+      const idx = +chip.dataset.idx;
+      if(state.selectedIdx.has(idx)) state.selectedIdx.delete(idx); else state.selectedIdx.add(idx);
+      chip.classList.toggle('on'); renderChart();
+    };
+    if(state.raw.meta.countIndex.includes(i)) chipsCounts.appendChild(chip);
+    else if(state.raw.meta.feeIndex.includes(i)) chipsFees.appendChild(chip);
+  });
+  
+  if(init) state.selectedIdx = new Set([0, 6]); 
+  syncHeaderChips();
+}
+
+function syncHeaderChips(){
+  document.querySelectorAll('#chipsCounts .chip, #chipsFees .chip').forEach(ch => 
+    ch.classList.toggle('on', state.selectedIdx.has(+ch.dataset.idx))
+  );
+}
+function syncBranchChips(){
+  document.querySelectorAll('#branchChips .chip').forEach(ch => 
+    ch.classList.toggle('on', state.labelSel.has(ch.textContent))
+  );
+}
+
+function quickSelect(kind){
+  state.selectedIdx.clear();
+  (kind==='count' ? state.raw.meta.countIndex : state.raw.meta.feeIndex).forEach(i => state.selectedIdx.add(i));
+  syncHeaderChips(); renderChart();
+}
+
+// === 5. 차트 렌더링 로직 (핵심) ===
+function renderChart(){
+  const block = currentBlock();
+  let idxs = [...state.selectedIdx];
+
+  // 1. 라벨 필터링
+  let labelsToProcess = [];
+  let labelIndices = [];
+
+  if(state.mode === 'hubAll'){
+    labelsToProcess = block.labels.filter(l => HUB_ALLOWED.includes(l));
+    labelIndices = block.labels.map((l, i) => HUB_ALLOWED.includes(l) ? i : -1).filter(i => i >= 0);
+  } else if(state.mode === 'branch' || state.mode === 'branchAll'){
+    const blockLabels = block.labels;
+    labelsToProcess = Array.from(state.labelSel).filter(l => blockLabels.includes(l));
+    labelIndices = labelsToProcess.map(l => blockLabels.indexOf(l)).filter(i => i !== -1);
+  }
+
+  if (!labelsToProcess.length || !idxs.length) { drawEmpty('데이터가 선택되지 않았습니다.'); return; }
+
+  // 2. 커스텀 정렬 적용 (Top N 아닐 때만)
+  if (!state.showTopN) {
+    const combined = labelsToProcess.map((l, i) => ({ label: l, idx: labelIndices[i] }));
+    combined.sort((a, b) => getSortIndex(a.label) - getSortIndex(b.label));
+    labelsToProcess = combined.map(c => c.label);
+    labelIndices = combined.map(c => c.idx);
+  }
+
+  // 3. Top N 로직
+  if (state.showTopN && idxs.length > 0) {
+    const sortIdx = idxs[0];
+    const dataArr = labelIndices.map(origIdx => ({
+        label: block.labels[origIdx],
+        value: parseNum(block.data[origIdx]?.[sortIdx]),
+        origIdx: origIdx
+    }));
+    dataArr.sort((a, b) => (b.value || 0) - (a.value || 0)); // 내림차순
+    const topData = dataArr.slice(0, state.topNCount);
     
-    if excel_src: st.success("데이터 연결됨")
-    else: st.info("데이터 파일 필요")
-    
-    st.markdown("---")
-    mode = st.radio("MENU", ["📊 현황 스냅샷", "📈 추이 분석 (정지/부실)"])
-    
-    st.markdown("---")
-    sel_hub = st.selectbox("본부 선택", ["전체"] + list(HUB_BRANCH_MAP.keys()))
-    
-    # 지사 선택 로직 (커스텀 정렬 적용)
-    raw_branches = ALL_BRANCHES if sel_hub == "전체" else HUB_BRANCH_MAP.get(sel_hub, [])
-    
-    # 정렬: PREFERRED_ORDER에 있는 것을 앞으로, 나머지는 가나다순
-    def sort_key(name):
-        try: return PREFERRED_ORDER.index(name)
-        except: return 999
-    
-    sorted_branches = sorted(raw_branches, key=sort_key)
-    
-    # 기본 선택: 상위 5개 (본부 데이터가 있다면 그것부터)
-    default_sel = sorted_branches[:5] if sel_hub == "전체" else sorted_branches
-    sel_brs = st.multiselect("지사 선택", sorted_branches, default=default_sel)
+    labelsToProcess = topData.map(d => d.label);
+    labelIndices = topData.map(d => d.origIdx);
+  }
 
-# === Main ===
+  // 4. 데이터셋 구축
+  const datasets = buildDatasets(block.header, idxs, (ci) => labelIndices.map(i => parseNum(block.data[i]?.[ci])), labelsToProcess);
+  const cfg = buildChartCfg(labelsToProcess, datasets, block.header, idxs);
 
-if not excel_src:
-    st.warning("⚠️ 데이터를 불러올 수 없습니다. 엑셀 파일을 확인해주세요.")
-    st.stop()
+  // 5. 차트 그리기
+  const cvs1 = document.getElementById('chart');
+  const cvs2 = document.getElementById('chart2');
+  const p2 = document.getElementById('secondChartPanel');
+  const container = document.getElementById('chartContainer');
 
-if "스냅샷" in mode:
-    st.title("📊 정지 및 SP 현황 스냅샷")
-    st.markdown("현재 시점의 정지 건수와 월정료 현황입니다.")
-    
-    df = load_total_data(excel_src)
-    if df is None or df.empty:
-        st.error("스냅샷 데이터를 찾을 수 없습니다.")
-    else:
-        t1, t2, t3 = st.tabs(["📌 Total (총정지)", "⚡ SP 기준", "📉 KPI (부실율)"])
-        def render_snap(key):
-            mask = df['데이터셋'] == key
-            if sel_hub != "전체" or sel_brs:
-                df_v = df[mask & (df['구분'] == '지사') & (df['지사'].isin(sel_brs))]
-            else:
-                df_v = df[mask & (df['구분'] == '본부')]
-                df_v['지사'] = df_v['본부'] # 시각화용
-            
-            if df_v.empty: st.info("해당 데이터 없음"); return
-            
-            # KPI Cards
-            c1, c2, c3 = st.columns(3)
-            with c1: 
-                v = df_v[df_v['지표']=='L+i형 건']['값'].sum()
-                st.metric("총 건수", f"{int(v):,}")
-            with c2:
-                v = df_v[df_v['지표']=='L+i형 월정료']['값'].sum()
-                st.metric("총 월정료", f"{int(v/1000):,}천원")
-            with c3:
-                v = df_v[df_v['지표'].str.contains('L\+i형.*정지율')]['값'].mean()
-                # 정지율 포맷팅
-                st.metric("평균 정지율", f"{v:.2f}%" if key=='KPI' else f"{v*100:.2f}%")
-            
-            # Chart
-            m_type = st.radio("지표 유형", ["건수", "금액", "비율"], key=f"r_{key}", horizontal=True)
-            if m_type == "건수": cols = ["L형 건", "i형 건", "L+i형 건"]; fmt = ",.0f"
-            elif m_type == "금액": cols = ["L형 월정료", "i형 월정료", "L+i형 월정료"]; fmt = ",.0f"
-            else: cols = [c for c in df['지표'].unique() if '정지율' in c and 'L+i' in c]; fmt = ".2f"
-            
-            # 필터링 및 정렬
-            df_c = df_v[df_v['지표'].isin(cols)].copy()
-            # 지사 정렬 (커스텀 순서)
-            df_c['sort_idx'] = df_c['지사'].apply(sort_key)
-            df_c = df_c.sort_values(['sort_idx', '값'], ascending=[True, False])
-            
-            fig = px.bar(
-                df_c, x='지사', y='값', color='지표', 
-                barmode='group', text_auto=fmt,
-                color_discrete_sequence=px.colors.qualitative.Prism
-            )
-            fig.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)",
-                xaxis_title=None,
-                yaxis_title=None,
-                transition_duration=500  # 애니메이션 효과
-            )
-            st.plotly_chart(fig, use_container_width=True)
+  if(CHART) CHART.destroy();
+  if(CHART2) CHART2.destroy();
 
-        with t1: render_snap("Total")
-        with t2: render_snap("SP")
-        with t3: render_snap("KPI")
+  // 2개 차트로 분리 (막대/레이더 모드에서만)
+  if ((state.type === 'bar' || state.type === 'radar') && idxs.length > 3) {
+      container.classList.add('panel-row');
+      p2.style.display = 'block';
 
-else: # 추이 분석
-    st.title("📈 정지율/부실율 트렌드 분석")
-    type_r = st.radio("분석 항목", ["정지율", "부실율"], horizontal=True)
-    
-    key = "suspension" if type_r == "정지율" else "failure"
-    df_r = load_rate_data(excel_src, key)
-    
-    if df_r is None or df_r.empty:
-        st.error(f"{type_r} 데이터를 찾을 수 없습니다.")
-    else:
-        # 필터링
-        if sel_brs: 
-            df_v = df_r[df_r['지사'].isin(sel_brs)].copy()
-        elif sel_hub != "전체": 
-            df_v = df_r[df_r['본부'] == sel_hub].copy()
-        else: 
-            df_v = df_r.copy()
-            
-        if df_v.empty:
-            st.warning("선택된 지사의 데이터가 없습니다.")
-        else:
-            # === 정렬 로직 적용 ===
-            # 커스텀 정렬 키 생성
-            df_v['sort_idx'] = df_v['지사'].apply(sort_key)
-            # 지사 이름 순서대로 정렬 (범례 순서 보장을 위해)
-            df_v = df_v.sort_values(['sort_idx', '날짜'])
-            
-            # === 고급 차트 (Plotly Graph Objects 사용) ===
-            fig = go.Figure()
-            
-            # 지사별로 라인 추가
-            for branch_name in df_v['지사'].unique():
-                d = df_v[df_v['지사'] == branch_name]
-                fig.add_trace(go.Scatter(
-                    x=d['날짜'], y=d['비율'],
-                    mode='lines+markers',
-                    name=branch_name,
-                    hovertemplate=f"<b>{branch_name}</b><br>날짜: %{{text}}<br>{type_r}: %{{y:.2f}}%<extra></extra>",
-                    text=d['월'], # 한글 월 표시용
-                    line=dict(width=3),
-                    marker=dict(size=8)
-                ))
-            
-            # 차트 레이아웃 고급화
-            fig.update_layout(
-                hovermode="x unified",
-                xaxis=dict(
-                    tickformat="%y년 %-m월", # 한글 날짜 포맷 (예: 25년 6월)
-                    showgrid=True,
-                    gridcolor='#f1f3f5'
-                ),
-                yaxis=dict(
-                    ticksuffix="%", # % 단위 표시
-                    tickformat=".1f", # 소수점 1자리 (예: 0.5%)
-                    showgrid=True,
-                    gridcolor='#f1f3f5'
-                ),
-                legend=dict(
-                    orientation="h", y=1.1, x=0,
-                    bgcolor="rgba(255,255,255,0.5)",
-                    bordercolor="#e9ecef", borderwidth=1
-                ),
-                plot_bgcolor="white",
-                height=550,
-                transition=dict(duration=500, easing="cubic-in-out") # 애니메이션
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # === 요약 테이블 (애니메이션 바 포함) ===
-            st.markdown(f"### 📋 {type_r} 상세 현황")
-            
-            latest_date = df_v['날짜'].max()
-            prev_date = df_v[df_v['날짜'] < latest_date]['날짜'].max()
-            
-            # 피벗 테이블 생성
-            piv = df_v.pivot(index='지사', columns='날짜', values='비율')
-            
-            # 증감 계산
-            if prev_date and latest_date:
-                piv['전월대비'] = piv[latest_date] - piv[prev_date]
-            else:
-                piv['전월대비'] = 0.0
-                
-            # 정렬 (커스텀 순서)
-            piv['sort_key'] = piv.index.map(sort_key)
-            piv = piv.sort_values('sort_key').drop(columns=['sort_key'])
-            
-            # 테이블 표시용 데이터 정리
-            display_df = piv[[latest_date, '전월대비']].copy()
-            display_df.columns = [f"{latest_date.strftime('%y년 %-m월')} (%)", "전월비 (%p)"]
-            
-            # 스타일링 (색상 바 적용)
-            st.dataframe(
-                display_df.style
-                .format("{:.2f}")
-                .background_gradient(cmap="Reds", subset=[display_df.columns[0]]) # 비율이 높을수록 빨강
-                .text_gradient(cmap="RdBu_r", subset=[display_df.columns[1]], vmin=-0.5, vmax=0.5), # 증감 색상
-                use_container_width=True
-            )
+      const mid = Math.ceil(idxs.length / 2);
+      const idxs1 = idxs.slice(0, mid);
+      const idxs2 = idxs.slice(mid);
+
+      const d1 = buildDatasets(block.header, idxs1, (ci) => labelIndices.map(i => parseNum(block.data[i]?.[ci])), labelsToProcess);
+      const c1 = buildChartCfg(labelsToProcess, d1, block.header, idxs1);
+      CHART = new Chart(cvs1, c1);
+
+      const d2 = buildDatasets(block.header, idxs2, (ci) => labelIndices.map(i => parseNum(block.data[i]?.[ci])), labelsToProcess);
+      const c2 = buildChartCfg(labelsToProcess, d2, block.header, idxs2);
+      CHART2 = new Chart(cvs2, c2);
+  } else {
+      container.classList.remove('panel-row');
+      p2.style.display = 'none';
+      CHART = new Chart(cvs1, cfg);
+  }
+}
+
+// === 6. 헬퍼 함수 ===
+function getSortIndex(label) {
+  const idx = PREFERRED_ORDER.indexOf(label);
+  return idx === -1 ? 999 : idx;
+}
+
+function buildDatasets(headers, idxs, valCol, labels) {
+  return idxs.map((ci, k) => {
+    const isFee = state.raw.meta.feeIndex.includes(ci);
+    const isPct = (headers[ci]||'').includes('%') || (headers[ci]||'').includes('율');
+
+    let type = state.type;
+    let yAxisID = 'y';
+    if(state.type === 'mix') {
+        if(isFee || isPct) { type = 'line'; yAxisID = 'y2'; }
+        else { type = 'bar'; }
+    }
+
+    return {
+      type: type,
+      label: headers[ci],
+      data: valCol(ci),
+      backgroundColor: isFee ? COLORS_BG[k % COLORS_BG.length] : COLORS[k % COLORS.length],
+      borderColor: isFee ? COLORS[k % COLORS.length] : COLORS[k % COLORS.length],
+      borderWidth: type === 'line' ? 3 : 0,
+      borderRadius: 4,
+      tension: 0.3,
+      yAxisID: yAxisID,
+      datalabels: {
+        display: labels.length <= 15 ? 'auto' : false, // 데이터 많으면 라벨 숨김
+        align: 'end', anchor: 'end',
+        formatter: (v) => formatValue(v, isPct)
+      }
+    };
+  });
+}
+
+function buildChartCfg(labels, datasets, headers, idxs) {
+  // 공통 옵션
+  const options = {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 1000, easing: 'easeOutQuart' },
+    layout: { padding: { top: 20, right: 20, left: 10, bottom: 10 } },
+    plugins: {
+      legend: { labels: { usePointStyle: true, font: { family: 'Pretendard', size: 12 } } },
+      tooltip: {
+        backgroundColor: 'rgba(33, 37, 41, 0.95)',
+        titleFont: { family: 'Pretendard', size: 14 },
+        bodyFont: { family: 'Pretendard', size: 13 },
+        padding: 12, cornerRadius: 8,
+        callbacks: {
+          label: (ctx) => {
+             const isPct = ctx.dataset.yAxisID === 'y2' || ctx.dataset.label.includes('%') || ctx.dataset.label.includes('율');
+             return ` ${ctx.dataset.label}: ${formatValue(ctx.parsed.y || ctx.parsed.r, isPct)}`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: { family: 'Pretendard' } } },
+      y: { 
+        beginAtZero: true, grid: { color: '#f1f3f5' }, border: { display: false },
+        ticks: { font: { family: 'Pretendard' }, callback: (v) => v.toLocaleString() }
+      }
+    }
+  };
+
+  if(state.type === 'mix') {
+    options.scales.y2 = {
+      position: 'right', beginAtZero: true, grid: { display: false },
+      ticks: { callback: (v) => v + '%' } // 오른쪽 축 % 표시
+    };
+  }
+  
+  if(state.type === 'radar') {
+    options.scales = { r: { beginAtZero: true, pointLabels: { font: { family: 'Pretendard', size: 12 } } } };
+  }
+
+  return { type: state.type === 'mix' ? 'bar' : state.type, data: { labels, datasets }, options };
+}
+
+function bindTopNButton() {
+    const btn = document.getElementById('toggleTopN');
+    btn.onclick = () => {
+        state.showTopN = !state.showTopN;
+        btn.textContent = state.showTopN ? `전체 보기 (${state.topNCount} 적용됨)` : `🏆 Top ${state.topNCount} 보기`;
+        btn.classList.toggle('on', state.showTopN);
+        renderChart();
+    };
+}
+
+function bindSeg(container, onChange){
+  container.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      container.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      onChange(btn.dataset.v);
+    };
+  });
+}
+
+// === 유틸리티 ===
+function parseNum(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const num = Number(String(v).replace(/[,%\s]/g, ''));
+  return isNaN(num) ? null : num;
+}
+
+function formatValue(v, isPct) {
+  if (v == null || isNaN(v)) return '';
+  if (isPct) {
+      // 1 미만(예: 0.005)인 경우 100을 곱해서 표시할지, 원본이 이미 %인지 판단 필요
+      // 여기서는 값이 1보다 작으면 100을 곱하는 로직을 추가 (상황에 따라 조정 필요)
+      let val = Number(v);
+      if (Math.abs(val) <= 1 && val !== 0) val *= 100; 
+      return val.toFixed(1) + '%'; // 소수점 1자리 + %
+  }
+  return Number(v).toLocaleString('ko-KR');
+}
+
+function drawEmpty(msg){
+  const ctx = document.getElementById('chart').getContext('2d');
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  if(CHART) CHART.destroy(); if(CHART2) CHART2.destroy();
+  ctx.save();
+  ctx.font = '16px Pretendard'; ctx.fillStyle = '#868e96'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(msg, ctx.canvas.width/2, ctx.canvas.height/2);
+  ctx.restore();
+}
+
+</script>
+</body>
+</html>
