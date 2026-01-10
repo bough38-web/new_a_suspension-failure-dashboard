@@ -6,14 +6,13 @@ from plotly.subplots import make_subplots
 import os
 import re
 
-# === 1. 페이지 및 스타일 설정 (고급 테마) ===
+# === 1. Page & Style Configuration (Expert UI/UX) ===
 st.set_page_config(
-    page_title="KTT 지사별 운영 현황 분석",
+    page_title="KTT Branch Operation Dashboard",
     page_icon="📈",
     layout="wide"
 )
 
-# 고급 CSS (Pretendard 폰트, 카드 디자인, 탭 스타일)
 st.markdown("""
 <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
@@ -22,23 +21,30 @@ st.markdown("""
         font-family: 'Pretendard', sans-serif !important;
     }
     
-    /* 분석 카드 스타일 */
+    /* Global Background & Text */
+    .stApp {
+        background-color: #f8f9fa;
+        color: #212529;
+    }
+
+    /* Analysis Card Style */
     .analysis-card {
         background-color: #ffffff;
         border-radius: 16px;
         padding: 24px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.03);
         border: 1px solid #f1f3f5;
         margin-bottom: 24px;
         transition: transform 0.2s ease;
     }
     .analysis-card:hover {
-        transform: translateY(-3px);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.06);
     }
     
-    /* 인사이트 박스 */
+    /* Insight Box */
     .insight-box {
-        background-color: #f8f9fa;
+        background-color: #f1f3f5;
         border-left: 4px solid #228be6;
         padding: 20px;
         border-radius: 8px;
@@ -46,9 +52,9 @@ st.markdown("""
     }
     .insight-title {
         font-weight: 700;
-        color: #212529;
+        color: #343a40;
         margin-bottom: 12px;
-        font-size: 1.1em;
+        font-size: 1.05em;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -56,33 +62,52 @@ st.markdown("""
     .insight-text {
         color: #495057;
         font-size: 0.95em;
-        line-height: 1.7;
+        line-height: 1.6;
     }
     
-    /* 메트릭 스타일 */
+    /* Metric Style */
     div[data-testid="stMetric"] {
-        background-color: #fff;
-        padding: 15px;
-        border-radius: 10px;
+        background-color: #ffffff;
+        padding: 16px;
+        border-radius: 12px;
         border: 1px solid #e9ecef;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+    }
+    div[data-testid="stMetric"] label {
+        font-size: 0.9em;
+        color: #868e96;
+    }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        font-size: 1.6em;
+        font-weight: 700;
+        color: #212529;
+    }
+
+    /* Expander Style */
+    .streamlit-expanderHeader {
+        font-weight: 600;
+        font-family: 'Pretendard';
+        background-color: #ffffff;
+        border-radius: 8px;
     }
     
-    /* 탭 스타일 */
+    /* Tabs */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] { 
-        height: 48px; border-radius: 8px; background-color: #fff; 
-        border: 1px solid #e9ecef; font-weight: 600; color: #868e96;
+        height: 44px; border-radius: 8px; background-color: #ffffff; 
+        border: 1px solid #dee2e6; font-weight: 600; color: #495057;
+        font-size: 0.9em;
     }
     .stTabs [aria-selected="true"] { 
         background-color: #e7f5ff !important; border-color: #1c7ed6 !important; 
         color: #1c7ed6 !important; 
     }
-    [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #e9ecef; }
+    
+    [data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e9ecef; }
 </style>
 """, unsafe_allow_html=True)
 
-# === 2. 설정 및 상수 ===
+# === 2. Settings & Constants ===
 DEFAULT_EXCEL_FILE = "data.xlsx"
 
 HUB_BRANCH_MAP = {
@@ -95,16 +120,16 @@ HUB_BRANCH_MAP = {
 }
 ALL_BRANCHES = [b for branches in HUB_BRANCH_MAP.values() for b in branches]
 
-# 정렬 순서 (강북/강원 우선)
+# Updated Sort Order
 PREFERRED_ORDER = ["강북강원", "본부", "중앙", "강북", "서대문", "고양", "의정부", "남양주", "강릉", "원주"]
 def sort_key(name):
     try: return PREFERRED_ORDER.index(name)
     except: return 999
 
-# 고급 색상 팔레트
+# Palette
 COLORS = ['#228be6', '#fa5252', '#40c057', '#fcc419', '#7950f2', '#e64980', '#15aabf', '#868e96']
 
-# === 3. 데이터 로드 함수 ===
+# === 3. Data Loading Functions ===
 
 def parse_date_robust(date_str):
     try:
@@ -126,7 +151,7 @@ def find_sheet_by_keyword(excel_file, keywords):
     except: return None
 
 def get_excel_file():
-    uploaded = st.sidebar.file_uploader("📂 엑셀 파일 업로드 (.xlsx)", type=['xlsx'])
+    uploaded = st.sidebar.file_uploader("📂 Upload Excel File (.xlsx)", type=['xlsx'])
     if uploaded: return uploaded
     if os.path.exists(DEFAULT_EXCEL_FILE): return DEFAULT_EXCEL_FILE
     return None
@@ -154,7 +179,7 @@ def load_total_data(file_source):
             if not org or org == 'nan': continue
             
             is_hub = org in HUB_BRANCH_MAP.keys()
-            is_br = False; hub_name = None
+            is_br = False; hub_name = org
             if is_hub: hub_name = org
             else:
                 for h, brs in HUB_BRANCH_MAP.items():
@@ -213,7 +238,7 @@ def load_rate_data(file_source, type_key):
         return res
     except: return None
 
-# === 4. 데이터 가공 ===
+# === 4. Data Processing ===
 def process_branch_bm_data(df_total, branch_name):
     mask = (df_total['지사'] == branch_name) & (df_total['데이터셋'] == 'KPI')
     df = df_total[mask]
@@ -223,7 +248,6 @@ def process_branch_bm_data(df_total, branch_name):
         v = df[df['지표'] == metric]['값'].values
         return v[0] if len(v) > 0 else 0.0
 
-    # KPI 시트의 정지율이 1 미만(0.005)일 경우 %로 변환
     bm_data = [
         {
             "BM": "L형", "건수": get_val("L형 건"), "금액": get_val("L형 월정료"),
@@ -255,7 +279,34 @@ def generate_text_insight(df_bm, df_trend_susp):
     
     return "\n\n".join(insights)
 
-# === 5. UI 구성 ===
+def get_hub_summary(df_total):
+    """Calculate summary stats for each hub"""
+    mask_kpi = (df_total['데이터셋'] == 'KPI') & (df_total['구분'] == '본부')
+    df = df_total[mask_kpi]
+    summary = []
+    
+    for hub in HUB_BRANCH_MAP.keys():
+        d = df[df['본부'] == hub]
+        if d.empty: continue
+        
+        try:
+            cnt = d[d['지표'] == 'L+i형 건']['값'].sum()
+            amt = d[d['지표'] == 'L+i형 월정료']['값'].sum()
+            rate = d[d['지표'].str.contains('L\+i형.*정지율')]['값'].mean()
+            # If rate < 1, assume it needs *100.
+            if rate < 1: rate *= 100
+                
+            summary.append({
+                "본부": hub,
+                "총건수": cnt,
+                "총금액": amt,
+                "정지율": rate
+            })
+        except: continue
+        
+    return pd.DataFrame(summary)
+
+# === 5. UI Layout ===
 
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2702/2702602.png", width=50)
@@ -265,38 +316,49 @@ with st.sidebar:
     st.markdown("---")
     mode = st.radio("MENU", ["🔍 지사별 상세 분석", "📊 전체 현황 스냅샷", "📈 전체 추이 비교"])
 
-# === 메인 로직 ===
+# === Main Logic ===
 
 if not excel_src:
-    st.warning("⚠️ 데이터를 분석할 엑셀 파일을 업로드해주세요.")
+    st.warning("⚠️ Please upload the Excel file to proceed.")
     st.stop()
 
-# 데이터 로드
+# Load Data
 df_total = load_total_data(excel_src)
 df_susp = load_rate_data(excel_src, "suspension")
 df_fail = load_rate_data(excel_src, "failure")
 
-if df_total is None: st.error("데이터 로드 실패"); st.stop()
+if df_total is None: st.error("Data Load Failed"); st.stop()
 
-# ----------------- 1. 지사별 상세 분석 (필터 사이드 적용) -----------------
+# --- TOP SECTION: Hub Status (Collapsible) ---
+with st.expander("🏢 본부별 운영 현황 요약 (펼치기/접기)", expanded=True):
+    hub_summ = get_hub_summary(df_total)
+    if not hub_summ.empty:
+        # Create columns dynamically
+        cols = st.columns(len(hub_summ))
+        for idx, row in hub_summ.iterrows():
+            with cols[idx % len(cols)]:
+                st.markdown(f"**{row['본부']}**")
+                st.caption(f"건수: {int(row['총건수']):,} / 금액: {int(row['총금액']/1000):,}천")
+                st.metric("정지율", f"{row['정지율']:.2f}%")
+    else:
+        st.info("본부 데이터가 없습니다.")
+
+# ----------------- 1. Branch Detail Analysis -----------------
 if "지사별 상세 분석" in mode:
     st.title("🔍 지사별 운영 현황 상세 분석")
     
-    # 지사 선택 (사이드바 배치 & 강북/강원 우선)
     with st.sidebar:
         st.markdown("---")
         st.subheader("필터링 설정")
-        # 본부 디폴트를 '강북/강원'으로 설정
         hub_options = ["전체"] + list(HUB_BRANCH_MAP.keys())
+        # Default Hub: Gangbuk/Gangwon
         default_hub_idx = hub_options.index("강북/강원") if "강북/강원" in hub_options else 0
-        
         sel_hub_detail = st.selectbox("본부 선택", hub_options, index=default_hub_idx)
         
         raw_branches = ALL_BRANCHES if sel_hub_detail == "전체" else HUB_BRANCH_MAP.get(sel_hub_detail, [])
         sorted_branches = sorted(raw_branches, key=sort_key)
         target_branch = st.selectbox("지사 선택", sorted_branches)
 
-    # 데이터 준비
     df_bm = process_branch_bm_data(df_total, target_branch)
     trend_s = df_susp[df_susp['지사'] == target_branch].sort_values('날짜') if df_susp is not None else pd.DataFrame()
     trend_f = df_fail[df_fail['지사'] == target_branch].sort_values('날짜') if df_fail is not None else pd.DataFrame()
@@ -304,7 +366,6 @@ if "지사별 상세 분석" in mode:
     if df_bm is None:
         st.warning("선택한 지사의 상세 데이터가 없습니다.")
     else:
-        # A. 텍스트 인사이트
         insight_text = generate_text_insight(df_bm, trend_s)
         st.markdown(f"""
         <div class="insight-box">
@@ -313,7 +374,6 @@ if "지사별 상세 분석" in mode:
         </div>
         """, unsafe_allow_html=True)
 
-        # B. BM 조건별 비교 (Bar Chart + Scatter)
         col1, col2 = st.columns(2)
         
         with col1:
@@ -325,8 +385,11 @@ if "지사별 상세 분석" in mode:
             fig_bar.update_layout(
                 plot_bgcolor="white", height=350, showlegend=False,
                 yaxis_title="월정료 (천원)", xaxis_title=None,
-                font=dict(family="Pretendard")
+                font=dict(family="Pretendard"),
+                margin=dict(t=30, b=0, l=0, r=0)
             )
+            # Prevent overlap on bar chart by adjusting text position if needed
+            fig_bar.update_traces(textposition='auto')
             st.plotly_chart(fig_bar, use_container_width=True)
             
         with col2:
@@ -340,40 +403,65 @@ if "지사별 상세 분석" in mode:
             fig_scat.update_layout(
                 plot_bgcolor="white", height=350,
                 xaxis_title="정지율 (%)", yaxis_title="월정료 규모",
-                xaxis=dict(showgrid=True, gridcolor='#eee'),
-                yaxis=dict(showgrid=True, gridcolor='#eee'),
-                font=dict(family="Pretendard")
+                xaxis=dict(showgrid=True, gridcolor='#f1f3f5'),
+                yaxis=dict(showgrid=True, gridcolor='#f1f3f5'),
+                font=dict(family="Pretendard"),
+                margin=dict(t=30, b=0, l=0, r=0)
             )
             st.plotly_chart(fig_scat, use_container_width=True)
 
-        # C. 월별 추이 (Dual Axis)
         st.markdown("##### 📈 월별 리스크 추이")
         fig_trend = make_subplots(specs=[[{"secondary_y": True}]])
         
         if not trend_s.empty:
+            # Only label the last point to prevent overlap
+            last_pt = trend_s.iloc[-1]
             fig_trend.add_trace(
                 go.Scatter(x=trend_s['날짜'], y=trend_s['비율'], name="정지율", 
-                           mode='lines+markers', line=dict(color=COLORS[0], width=3)),
+                           mode='lines+markers', 
+                           line=dict(color=COLORS[0], width=3),
+                           hovertemplate="날짜: %{x|%y.%m}<br>정지율: %{y:.2f}%"),
                 secondary_y=False
             )
+            # Add annotation for the last point
+            fig_trend.add_annotation(
+                x=last_pt['날짜'], y=last_pt['비율'],
+                text=f"{last_pt['비율']:.2f}%",
+                showarrow=False,
+                yshift=10,
+                font=dict(color=COLORS[0], weight="bold")
+            )
+
         if not trend_f.empty:
+            last_pt_f = trend_f.iloc[-1]
             fig_trend.add_trace(
                 go.Scatter(x=trend_f['날짜'], y=trend_f['비율'], name="부실율", 
-                           mode='lines+markers', line=dict(color=COLORS[1], width=3, dash='dot')),
+                           mode='lines+markers', 
+                           line=dict(color=COLORS[1], width=3, dash='dot'),
+                           hovertemplate="날짜: %{x|%y.%m}<br>부실율: %{y:.2f}%"),
                 secondary_y=True
+            )
+            fig_trend.add_annotation(
+                x=last_pt_f['날짜'], y=last_pt_f['비율'],
+                text=f"{last_pt_f['비율']:.2f}%",
+                showarrow=False,
+                yshift=-15,
+                yref="y2",
+                font=dict(color=COLORS[1], weight="bold")
             )
             
         fig_trend.update_layout(
             hovermode="x unified", plot_bgcolor="white", height=400,
             legend=dict(orientation="h", y=1.1),
             xaxis=dict(tickformat="%y년 %-m월", showgrid=True, gridcolor='#f1f3f5'),
-            font=dict(family="Pretendard")
+            font=dict(family="Pretendard"),
+            margin=dict(t=50, b=0, l=0, r=0)
         )
         fig_trend.update_yaxes(title_text="정지율 (%)", secondary_y=False, showgrid=True, gridcolor='#f1f3f5')
         fig_trend.update_yaxes(title_text="부실율 (%)", secondary_y=True, showgrid=False)
         st.plotly_chart(fig_trend, use_container_width=True)
 
-# ----------------- 2. 전체 현황 스냅샷 -----------------
+# ----------------- 2. Overall Snapshot -----------------
 elif "전체 현황 스냅샷" in mode:
     st.title("📊 전체 지사 운영 현황 스냅샷")
     
@@ -385,7 +473,14 @@ elif "전체 현황 스냅샷" in mode:
         
         raw_branches = ALL_BRANCHES if sel_hub == "전체" else HUB_BRANCH_MAP.get(sel_hub, [])
         sorted_branches = sorted(raw_branches, key=sort_key)
-        sel_brs = st.multiselect("지사 필터", sorted_branches, default=sorted_branches[:5])
+        
+        # Default Selection: Gang-neung, Won-ju, Nam-yang-ju + others
+        defaults = ["남양주", "강릉", "원주", "의정부", "고양"]
+        default_sel = [b for b in sorted_branches if b in defaults]
+        # If none found (e.g. different hub selected), fallback to first 5
+        if not default_sel: default_sel = sorted_branches[:5]
+            
+        sel_brs = st.multiselect("지사 필터", sorted_branches, default=default_sel)
     
     t1, t2, t3 = st.tabs(["📌 Total", "⚡ SP 기준", "📉 KPI"])
     
@@ -410,13 +505,16 @@ elif "전체 현황 스냅샷" in mode:
         
         fig = px.bar(df_c, x='지사', y='값', color='지표', barmode='group', text_auto=fmt, color_discrete_sequence=COLORS)
         fig.update_layout(plot_bgcolor="white", height=500, xaxis_title=None, font=dict(family="Pretendard"))
+        # Ensure percent format for rate
+        if m_type == "비율":
+             fig.update_traces(texttemplate='%{y:.2f}%')
         st.plotly_chart(fig, use_container_width=True)
 
     with t1: render_tab("Total")
     with t2: render_tab("SP")
     with t3: render_tab("KPI")
 
-# ----------------- 3. 전체 추이 비교 -----------------
+# ----------------- 3. Overall Trend Comparison -----------------
 else:
     st.title("📈 전체 지사 추이 비교 분석")
     type_r = st.radio("분석 항목", ["정지율", "부실율"], horizontal=True)
@@ -430,7 +528,13 @@ else:
         
         raw_branches = ALL_BRANCHES if sel_hub == "전체" else HUB_BRANCH_MAP.get(sel_hub, [])
         sorted_branches = sorted(raw_branches, key=sort_key)
-        sel_brs = st.multiselect("비교할 지사 선택", sorted_branches, default=sorted_branches[:5])
+        
+        # Default Selection: Gang-neung, Won-ju, Nam-yang-ju + others
+        defaults = ["남양주", "강릉", "원주", "의정부", "고양"]
+        default_sel = [b for b in sorted_branches if b in defaults]
+        if not default_sel: default_sel = sorted_branches[:5]
+
+        sel_brs = st.multiselect("비교할 지사 선택", sorted_branches, default=default_sel)
     
     if sel_brs:
         df_v = target_df[target_df['지사'].isin(sel_brs)].copy()
@@ -443,14 +547,26 @@ else:
             color = COLORS[i % len(COLORS)]
             fig.add_trace(go.Scatter(
                 x=d['날짜'], y=d['비율'], mode='lines+markers', name=branch,
-                line=dict(width=3, color=color), marker=dict(size=8, color=color)
+                line=dict(width=3, color=color), marker=dict(size=8, color=color),
+                hovertemplate=f"<b>{branch}</b><br>%{{x|%y.%m}}<br>{type_r}: %{{y:.2f}}%<extra></extra>"
             ))
+            
+            # Label only the last point to avoid overlap
+            last_val = d.iloc[-1]
+            fig.add_annotation(
+                x=last_val['날짜'], y=last_val['비율'],
+                text=f"{last_val['비율']:.2f}%",
+                showarrow=False,
+                yshift=10,
+                font=dict(color=color, size=11, weight="bold")
+            )
             
         fig.update_layout(
             hovermode="x unified", plot_bgcolor="white", height=550,
             xaxis=dict(tickformat="%y년 %-m월", showgrid=True, gridcolor='#f1f3f5'),
             yaxis=dict(ticksuffix="%", tickformat=".2f", showgrid=True, gridcolor='#f1f3f5'),
-            font=dict(family="Pretendard")
+            font=dict(family="Pretendard"),
+            margin=dict(r=20) # Add margin for last point labels
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
